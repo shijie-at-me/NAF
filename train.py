@@ -35,9 +35,7 @@ def trainer(cfg: DictConfig):
 
     terminal_console = Console()  # Terminal output
     file_name = os.path.join(log_dir, "train.log")
-    file_console = Console(
-        file=open(file_name, "w"),
-    )
+    file_console = Console(file=open(file_name, "w"))
 
     def log_print(*args, **kwargs):
         """Log to both terminal and file with immediate flushing"""
