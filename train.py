@@ -27,7 +27,7 @@ from utils.training import (
 FREQ = 100
 
 
-@hydra.main(config_path="config", config_name="base")
+@hydra.main(version_base="1.3", config_path="config", config_name="base")
 def trainer(cfg: DictConfig):
     # ============ Logger ============ #
     log_dir = HydraConfig.get().runtime.output_dir

@@ -6,6 +6,7 @@ defaults:
   - model: naf
   - loss: base
   - optimizer: adamw
+  - _self_
 
 # General parameters
 epochs: 1
