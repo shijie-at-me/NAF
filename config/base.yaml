@@ -1,0 +1,37 @@
+defaults:
+  - backbone: base
+  - dataset: imagenet
+  - dataloader@train_dataloader: train
+  - dataloader@val_dataloader: val
+  - model: naf
+  - loss: base
+  - optimizer: adamw
+  - _self_
+
+# General parameters
+epochs: 1
+train_steps: 25000
+dataroot: /datasets_local/
+
+model_ckpt: null
+
+use_bf16: True
+use_checkpointing: False
+use_scaler: False
+sanity: False
+
+# LR and HR image sizes
+img_size: 512
+target_size: ${img_size}
+down_factor: fixed
+
+# Experiment name, used as the top-level output directory
+exp_name: debug
+
+# Hydra configuration
+hydra:
+  run:
+    dir: ./output/${exp_name}/${hydra:runtime.choices.model}_${backbone.name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ./output/${exp_name}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}

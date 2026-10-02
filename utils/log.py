@@ -1,9 +1,7 @@
 import datetime
-import os
 
 from omegaconf import DictConfig, OmegaConf
 from rich.console import Console
-from torch.utils.tensorboard import SummaryWriter
 
 
 class DualConsole:
@@ -35,18 +33,6 @@ def print_run_header(console: DualConsole, cfg: DictConfig):
     console.print(f"[bold blue]Starting at {timestamp}[/bold blue]")
     console.print("[bold green]Configuration:[/bold green]")
     console.print(OmegaConf.to_yaml(cfg))
-
-
-def create_writer(base_log_dir):
-    """Create a TensorBoard writer in the next free ``version_<n>`` subdirectory of ``base_log_dir``."""
-    os.makedirs(base_log_dir, exist_ok=True)
-    existing_versions = [
-        int(d.split("_")[-1])
-        for d in os.listdir(base_log_dir)
-        if os.path.isdir(os.path.join(base_log_dir, d)) and d.startswith("version_")
-    ]
-    log_dir = os.path.join(base_log_dir, f"version_{max(existing_versions, default=-1) + 1}")
-    return SummaryWriter(log_dir=log_dir), log_dir
 
 
 def log_losses(writer, console, losses, lr, step, prefix):
