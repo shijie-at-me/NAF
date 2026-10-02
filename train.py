@@ -139,7 +139,7 @@ def train(cfg, writer, ckpt_dir, console):
             break
 
 
-@hydra.main(config_path="config", config_name="base")
+@hydra.main(config_path="config", config_name="base", version_base=None)
 def trainer(cfg: DictConfig):
     log_dir = HydraConfig.get().runtime.output_dir
     writer, ckpt_dir = create_writer(log_dir)
