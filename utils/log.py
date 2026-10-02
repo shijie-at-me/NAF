@@ -47,3 +47,13 @@ def create_writer(base_log_dir):
     ]
     log_dir = os.path.join(base_log_dir, f"version_{max(existing_versions, default=-1) + 1}")
     return SummaryWriter(log_dir=log_dir), log_dir
+
+
+def log_losses(writer, console, losses, lr, step, prefix):
+    """Write losses and learning rate to TensorBoard and print a one-line summary."""
+    for name, value in losses.items():
+        writer.add_scalar(f"Loss/{name}", value.item(), step)
+    writer.add_scalar("Learning Rate", lr, step)
+
+    loss_str = " | ".join(f"{name}: {value.item():.4f}" for name, value in losses.items())
+    console.print(f"{prefix} | {loss_str} | ")
