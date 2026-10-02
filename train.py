@@ -8,13 +8,14 @@ import torchvision.transforms as T
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from utils.backbone import load_multiple_backbones
 from utils.checkpoint import build_model, save_checkpoint
 from utils.data import get_batch, get_dataloaders
 from utils.img import IMAGENET_MEAN, IMAGENET_STD, round_to_nearest_multiple
-from utils.log import DualConsole, create_writer, log_losses, print_run_header
+from utils.log import DualConsole, log_losses, print_run_header
 from utils.training import setup_training_optimizations
 
 LOG_FREQ = 100
@@ -142,11 +143,11 @@ def train(cfg, writer, ckpt_dir, console):
 @hydra.main(config_path="config", config_name="base", version_base=None)
 def trainer(cfg: DictConfig):
     log_dir = HydraConfig.get().runtime.output_dir
-    writer, ckpt_dir = create_writer(log_dir)
+    writer = SummaryWriter(log_dir=log_dir)
 
     with DualConsole(os.path.join(log_dir, "train.log")) as console:
         print_run_header(console, cfg)
-        train(cfg, writer, ckpt_dir, console)
+        train(cfg, writer, log_dir, console)
 
     writer.close()
 

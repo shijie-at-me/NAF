@@ -25,7 +25,13 @@ img_size: 512
 target_size: ${img_size}
 down_factor: fixed
 
+# Experiment name, used as the top-level output directory
+exp_name: debug
+
 # Hydra configuration
 hydra:
   run:
-    dir: ./output/debug/${now:%Y-%m-%d}/${now:%H-%M-%S}  # Define the workdir
+    dir: ./output/${exp_name}/${hydra:runtime.choices.model}_${backbone.name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ./output/${exp_name}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}
