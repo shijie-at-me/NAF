@@ -7,6 +7,18 @@ from src.layers import CrossAttention, RoPE, encoder
 __all__ = ["NAF"]
 
 
+def guide_size(image_size, output_size, max_ratio=4):
+    """Size to downsample the guide image to, or None if it is already within ``max_ratio`` x ``output_size``.
+
+    Both sides are capped at ``max_ratio`` times the smaller output side.
+    """
+    (h, w), (oh, ow) = image_size, output_size
+    if h <= max_ratio * oh and w <= max_ratio * ow:
+        return None
+    cap = max_ratio * min(oh, ow)
+    return (min(h, cap), min(w, cap))
+
+
 class ImageEncoder(nn.Module):
     def __init__(
         self,
@@ -28,44 +40,27 @@ class ImageEncoder(nn.Module):
         self.rope = RoPE(embed_dim=out_channels, num_heads=heads_rope, base=rope_base, rescale_coords=rope_rescale)
 
     def forward_encoder(self, x, output_size):
-        if self.use_encoder:
-            x = torch.cat([self.encoder(x), self.sem_encoder(x)], dim=1)
-        x = F.adaptive_avg_pool2d(x, output_size=output_size)
-        return x
+        if not self.use_encoder:
+            return F.adaptive_avg_pool2d(x, output_size=output_size)
+
+        # Pool each branch before concatenating (pooling is per channel, so the result is the same):
+        # the full-resolution concatenation is never materialized, and without grad the first branch's
+        # full-resolution output is freed before the second branch runs
+        return torch.cat(
+            [
+                F.adaptive_avg_pool2d(self.encoder(x), output_size=output_size),
+                F.adaptive_avg_pool2d(self.sem_encoder(x), output_size=output_size),
+            ],
+            dim=1,
+        )
 
     def forward(self, x, output_size):
-        o_size = output_size
-        if x.shape[-2] > 4 * o_size[0] or x.shape[-1] > 4 * o_size[1]:
-            x = F.interpolate(
-                x,
-                size=(
-                    min(x.shape[-2], 4 * o_size[0], 4 * o_size[1]),
-                    min(x.shape[-1], 4 * o_size[1], 4 * o_size[0]),
-                ),
-                mode="bilinear",
-                align_corners=False,
-            )
+        size = guide_size(x.shape[-2:], output_size)
+        if size is not None:
+            x = F.interpolate(x, size=size, mode="bilinear", align_corners=False)
 
-        x = self.forward_encoder(x, o_size)
-        x = self.rope(x)
-        return x
-
-
-class QueryEncoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x
-
-
-class KeyEncoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x, features):
-        x = F.adaptive_avg_pool2d(x, output_size=features.shape[-2:])
-        return x
+        x = self.forward_encoder(x, output_size)
+        return self.rope(x)
 
 
 class NAF(nn.Module):
@@ -93,23 +88,15 @@ class NAF(nn.Module):
             img_layers=img_layers,
             rope_rescale=rope_rescale,
         )
-
-        self.query_encoder = QueryEncoder()
-
-        self.key_encoder = KeyEncoder()
-
         self.upsampler = CrossAttention(dim=dim, num_heads=heads_attn, kernel_size=(kernel_size, kernel_size))
 
     def forward(self, image, features, output_size, return_weights=False, *args, **kwargs):
-        x = self.image_encoder(image, output_size=output_size)
+        """Upsample ``features`` to ``output_size`` guided by ``image``.
 
-        queries = self.query_encoder(x)
-        keys = self.key_encoder(x, features)
-        values = features
-
-        if return_weights:
-            out, attn_weights = self.upsampler(queries, keys, values, image, return_weights=True)
-            return out, attn_weights
-        else:
-            out = self.upsampler(queries, keys, values, image)
-            return out
+        Queries are the encoded image at ``output_size``; keys are the same encoding pooled to the
+        resolution of ``features``, which are the values. Returns ``(out, attn_weights)`` if
+        ``return_weights``.
+        """
+        queries = self.image_encoder(image, output_size=output_size)
+        keys = F.adaptive_avg_pool2d(queries, output_size=features.shape[-2:])
+        return self.upsampler(queries, keys, features, image, return_weights=return_weights)
