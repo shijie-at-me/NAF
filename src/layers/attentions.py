@@ -29,7 +29,9 @@ def upsample_to_heads(x, size, num_heads, dtype):
     interpolation only copies values, so the result is identical to casting afterwards).
     """
     x = x.to(dtype).contiguous(memory_format=torch.channels_last)
-    x = F.interpolate(x, size=size, mode="nearest-exact")
+    # Autocast would run the interpolation in fp32; nearest only copies values, so keep ``dtype``
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        x = F.interpolate(x, size=size, mode="nearest-exact")
     return x.permute(0, 2, 3, 1).unflatten(-1, (num_heads, -1))
 
 
