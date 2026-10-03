@@ -1,19 +1,34 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import torch
 from hydra.utils import instantiate
 
 
+def resolve_checkpoint(ckpt_path):
+    """Local path of a checkpoint given as a path (``~`` expanded) or an http(s) URL; URLs are downloaded once to
+    ``<torch hub dir>/checkpoints``, the cache of ``torch.hub.load_state_dict_from_url``."""
+    if not ckpt_path.startswith(("http://", "https://")):
+        return os.path.expanduser(ckpt_path)
+    path = os.path.join(torch.hub.get_dir(), "checkpoints", os.path.basename(urlparse(ckpt_path).path))
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.hub.download_url_to_file(ckpt_path, path)
+    return path
+
+
 def build_model(model_cfg, device, ckpt_path=None, strict=True, weights_only=True):
-    """Instantiate a model from its config and optionally load a checkpoint into it.
+    """Instantiate a model from its config and optionally load a checkpoint (path or URL) into it.
 
     ``weights_only=False`` also unpickles non-tensor objects (e.g. the original FeatUp Lightning checkpoints);
     only use it with trusted files.
     """
     model = instantiate(model_cfg).to(device)
     if ckpt_path:
-        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=weights_only), strict=strict)
+        model.load_state_dict(
+            torch.load(resolve_checkpoint(ckpt_path), map_location=device, weights_only=weights_only), strict=strict
+        )
     return model
 
 

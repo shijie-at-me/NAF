@@ -45,10 +45,11 @@ def low_res_windows(out_len: int, in_len: int, kernel_size: int, dilation: int, 
 def _attend_rows(q, k, v, win_h, win_w, rows_per_window):
     """Attention of a chunk of query rows.
 
-    q: [B, R, W, n, D] (already scaled); k, v: [B, h, w, n, D]; win_h: [R / rows_per_window, kh]; win_w: [W', kw].
+    q: [B, R, W, n, D] (already scaled); k: [B, h, w, n, D]; v: [B, h, w, n, Dv], or [B, h, w, 1, Dv] to apply the
+    head-averaged weights to all value channels; win_h: [R / rows_per_window, kh]; win_w: [W', kw].
     Consecutive groups of ``rows_per_window`` query rows share a row of ``win_h``; when ``win_w`` has fewer rows
     than the queries have columns (integer ratio), groups of W / W' query columns share a row of ``win_w``.
-    Returns the output [B, R, W, n, Dv] and the softmax weights [B, R, W, n, kh * kw].
+    Returns the output [B, R, W, n or 1, Dv] and the softmax weights [B, R, W, n, kh * kw].
     """
     b, rows, wq, n, _ = q.shape
     kh, kw = win_h.shape[1], win_w.shape[1]
@@ -57,15 +58,16 @@ def _attend_rows(q, k, v, win_h, win_w, rows_per_window):
     k = k[:, win_h][:, :, :, win_w]
     v = v[:, win_h][:, :, :, win_w]
     weights = torch.einsum("byixjnd,byaxcnd->byixjnac", q, k).flatten(-2).softmax(dim=-1)
-    out = torch.einsum("byixjnac,byaxcne->byixjne", weights.unflatten(-1, (kh, kw)), v)
-    return out.reshape(b, rows, wq, n, -1), weights.reshape(b, rows, wq, n, -1)
+    applied = weights.mean(dim=5, keepdim=True) if v.shape[-2] == 1 < n else weights
+    out = torch.einsum("byixjnac,byaxcne->byixjne", applied.unflatten(-1, (kh, kw)), v)
+    return out.reshape(b, rows, wq, v.shape[-2], -1), weights.reshape(b, rows, wq, n, -1)
 
 
 def _attend_rows_output(q, k, v, win_h, win_w, rows_per_window):
     return _attend_rows(q, k, v, win_h, win_w, rows_per_window)[0]
 
 
-def upsampled_neighborhood_attention(q, k, v, kernel_size, dilation, scale, need_weights=True):
+def upsampled_neighborhood_attention(q, k, v, kernel_size, dilation, scale, need_weights=True, out_dtype=None):
     """Neighborhood attention of ``q`` over ``k``/``v`` nearest-exact upsampled to the resolution of ``q``.
 
     Equivalent to ``na2d(q, interp(k), interp(v), kernel_size, dilation)`` without materializing the upsampled
@@ -73,13 +75,17 @@ def upsampled_neighborhood_attention(q, k, v, kernel_size, dilation, scale, need
 
     Args:
         q: [B, H, W, n, D] queries.
-        k, v: [B, h, w, n, D] low-res keys and values (``v`` may have another head dim).
+        k, v: [B, h, w, n, D] low-res keys and values (``v`` may have another head dim). A ``v`` with a single
+            head [B, h, w, 1, Dv] gets the softmax weights averaged over the heads of ``q``/``k``.
         kernel_size, dilation: (height, width) pairs, as for NATTEN.
         scale: Query scaling (NATTEN uses ``D ** -0.5``).
         need_weights: Also return the attention weights (then no chunk is recomputed in the backward pass).
+        out_dtype: dtype of the output (default: that of ``q``). Without autograd, each chunk is written straight
+            into the output, cast on the fly, instead of being concatenated (and cast) at the end.
 
     Returns:
-        Output [B, H, W, n, Dv], and softmax attention weights [B, n, H, W, kh * kw] (NATTEN's layout) or None.
+        Output [B, H, W, n (or 1), Dv], and softmax attention weights [B, n, H, W, kh * kw] (NATTEN's layout) or
+        None.
     """
     (b, hq, wq, n, d), (h, w) = q.shape, k.shape[1:3]
     win_h = low_res_windows(hq, h, kernel_size[0], dilation[0], q.device)
@@ -92,14 +98,23 @@ def upsampled_neighborhood_attention(q, k, v, kernel_size, dilation, scale, need
     if wq % w == 0 and (wq // w) == dilation[1]:
         win_w = win_w[:: wq // w]
 
-    # Per row of windows: the gathered keys (or values), or the attention weights of its queries if larger
+    # Per row of windows, the largest tensor: the gathered keys (or values), the attention weights of its queries,
+    # or their output
     num_offsets = kernel_size[0] * kernel_size[1]
-    row_elements = b * n * max(win_w.shape[0] * num_offsets * max(d, v.shape[-1]), rows_per_window * wq * num_offsets)
+    row_elements = b * max(
+        win_w.shape[0] * num_offsets * max(n * d, v.shape[-2] * v.shape[-1]),
+        rows_per_window * wq * max(n * num_offsets, v.shape[-2] * v.shape[-1]),
+    )
     windows_per_chunk = max(1, MAX_CHUNK_ELEMENTS // row_elements)
     # The weights of a checkpointed chunk can't be returned: they are only kept when not training through them
-    use_checkpoint = not need_weights and torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
+    needs_grad = torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
+    use_checkpoint = not need_weights and needs_grad
 
-    q = q * scale
+    if scale != 1:
+        q = q * scale
+    out_dtype = out_dtype or q.dtype
+    # Without autograd the output is allocated once: concatenating the chunks would briefly need twice its memory
+    out = None if needs_grad else q.new_empty((b, hq, wq, *v.shape[-2:]), dtype=out_dtype)
     outs, weights = [], []
     for start in range(0, win_h.shape[0], windows_per_chunk):
         win_rows = win_h[start : start + windows_per_chunk]
@@ -110,10 +125,14 @@ def upsampled_neighborhood_attention(q, k, v, kernel_size, dilation, scale, need
                 checkpoint(_attend_rows_output, q_rows, k, v, win_rows, win_w, rows_per_window, use_reentrant=False)
             )
         else:
-            out, weight = _attend_rows(q_rows, k, v, win_rows, win_w, rows_per_window)
-            outs.append(out)
+            chunk, weight = _attend_rows(q_rows, k, v, win_rows, win_w, rows_per_window)
+            if out is None:
+                outs.append(chunk)
+            else:
+                out[:, start * rows_per_window : start * rows_per_window + chunk.shape[1]] = chunk
             if need_weights:
                 weights.append(weight)
 
-    out = torch.cat(outs, dim=1)
+    if out is None:
+        out = torch.cat(outs, dim=1).to(out_dtype)
     return out, torch.cat(weights, dim=1).permute(0, 3, 1, 2, 4) if need_weights else None
