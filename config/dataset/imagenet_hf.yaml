@@ -1,0 +1,7 @@
+_target_: evaluation.dataset.image_dataset.HFImageDataset
+# Hub repo id or URL; gated, so run `huggingface-cli login` and accept the terms on the Hub page first
+repo: ILSVRC/imagenet-1k
+split: train
+# ~150GB for ImageNet-1k: point this at scratch storage, null uses $HF_HOME/datasets
+cache_dir: null
+num_proc: 8
