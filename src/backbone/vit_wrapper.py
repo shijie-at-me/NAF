@@ -7,7 +7,7 @@ from torch import nn
 from .factory import create_backbone_model, get_backbone_family, infer_patch_size, split_finetune_tag
 
 # Where the dvt_ / fit3d_ fine-tuned checkpoints live, as ``<tag>_<model name>.pth``.
-FINETUNED_CKPT_DIR = "/home/lchambon/workspace/JAFAR/ckpts"
+FINETUNED_CKPT_DIR = os.environ.get("NAF_FINETUNED_CKPT_DIR", "/home/lchambon/workspace/JAFAR/ckpts")
 
 
 class PretrainedViTWrapper(nn.Module):
@@ -39,7 +39,7 @@ class PretrainedViTWrapper(nn.Module):
 
     def load_finetuned_weights(self, ckpt_path: str, tag: str):
         """DVT checkpoints hold the whole wrapper under ``"model"``; FiT3D ones hold the bare backbone."""
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         if tag == "dvt":
             self.load_state_dict(ckpt["model"], strict=True)
         elif tag == "fit3d":
