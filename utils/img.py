@@ -1,7 +1,6 @@
 # import cv2
 
 import torch
-import torchvision.transforms as T
 from einops import rearrange
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -22,11 +21,3 @@ def create_coordinate(h, w, start=0, end=1, device="cuda", dtype=torch.float32):
     coord_map = torch.stack([xx, yy], axis=-1)[None, ...]
     coords = rearrange(coord_map, "b h w c -> b (h w) c", h=h, w=w)
     return coords
-
-
-class PILToTensor:
-    """Convert PIL Image to Tensor"""
-
-    def __call__(self, image):
-        image = T.functional.pil_to_tensor(image)
-        return image

@@ -6,8 +6,6 @@ import torchvision.transforms as T
 from hydra.utils import instantiate
 from torchvision.transforms.functional import InterpolationMode
 
-from utils.img import PILToTensor
-
 
 def seed_worker(worker_id=None):
     worker_seed = torch.initial_seed() % 2**32
@@ -15,23 +13,20 @@ def seed_worker(worker_id=None):
     random.seed(worker_seed)
 
 
+def resize_crop(size, interpolation):
+    """Resize the short side to ``size``, then center-crop to ``size`` x ``size``; returns a uint8 tensor."""
+    return T.Compose([T.Resize(size, interpolation=interpolation), T.CenterCrop((size, size)), T.PILToTensor()])
+
+
 def build_transforms(img_size, target_size):
-    """Resize + center-crop transforms for images and their dense labels."""
+    """Transforms for images (bilinear) and their dense labels (nearest).
+
+    Both stay uint8: images are converted to float in [0, 1] on the device by ``get_batch``, so workers,
+    shared memory, pinned memory and the host-to-device copy all carry 4x less data than float32.
+    """
     return {
-        "image": T.Compose(
-            [
-                T.Resize(img_size, interpolation=InterpolationMode.BILINEAR),
-                T.CenterCrop((img_size, img_size)),
-                T.ToTensor(),
-            ]
-        ),
-        "label": T.Compose(
-            [
-                T.Resize(target_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                T.CenterCrop((target_size, target_size)),
-                PILToTensor(),
-            ]
-        ),
+        "image": resize_crop(img_size, InterpolationMode.BILINEAR),
+        "label": resize_crop(target_size, InterpolationMode.NEAREST_EXACT),
     }
 
 
@@ -71,7 +66,21 @@ def get_dataloaders(cfg, shuffle=True):
     )
 
 
+def to_float_image(image):
+    """uint8 image -> float32 in [0, 1], bit-identical to ``T.ToTensor()``; float images pass through.
+
+    Divides by a 0-dim tensor rather than a Python scalar: CUDA turns scalar division into multiplication by
+    the reciprocal, which is off by one ulp for about half of the values.
+    """
+    if image.dtype != torch.uint8:
+        return image
+    return image.float().div_(torch.full((), 255.0, device=image.device))
+
+
 def get_batch(batch, device):
-    """Move the image tensor of a batch to ``device``."""
-    batch["image"] = batch["image"].to(device)
+    """Move the batch images to ``device`` as float32 in [0, 1].
+
+    The copy is asynchronous when the dataloader pins memory; the uint8 -> float conversion runs on the device.
+    """
+    batch["image"] = to_float_image(batch["image"].to(device, non_blocking=True))
     return batch
