@@ -4,11 +4,15 @@ import torch
 from hydra.utils import instantiate
 
 
-def build_model(model_cfg, device, ckpt_path=None, strict=True):
-    """Instantiate a model from its config and optionally load a checkpoint into it."""
+def build_model(model_cfg, device, ckpt_path=None, strict=True, weights_only=True):
+    """Instantiate a model from its config and optionally load a checkpoint into it.
+
+    ``weights_only=False`` also unpickles non-tensor objects (e.g. the original FeatUp Lightning checkpoints);
+    only use it with trusted files.
+    """
     model = instantiate(model_cfg).to(device)
-    if ckpt_path is not None:
-        model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=strict)
+    if ckpt_path:
+        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=weights_only), strict=strict)
     return model
 
 
