@@ -1,0 +1,12 @@
+_target_: evaluation.dataset.voc.HFVOCDataset
+tag: "voc"
+# Hub repo id or URL with image / mask columns
+repo: shijli/voc2012
+# segmentation: 1464 train / 1449 val; segmentation_aug: 10582 train (SBD) / 1449 val
+name: segmentation
+split: "train"
+# null uses $HF_HOME/datasets
+cache_dir: null
+num_proc: null
+include_labels: true
+num_classes: 21
