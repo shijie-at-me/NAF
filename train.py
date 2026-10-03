@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from utils.backbone import load_multiple_backbones
 from utils.checkpoint import build_model, save_checkpoint
+from utils.config import expand_user_paths
 from utils.data import get_batch, get_dataloaders
 from utils.img import IMAGENET_MEAN, IMAGENET_STD, round_to_nearest_multiple
 from utils.log import DualConsole, log_losses, print_run_header
@@ -142,6 +143,7 @@ def train(cfg, writer, ckpt_dir, console):
 
 @hydra.main(config_path="config", config_name="base", version_base=None)
 def trainer(cfg: DictConfig):
+    expand_user_paths(cfg)
     log_dir = HydraConfig.get().runtime.output_dir
     writer = SummaryWriter(log_dir=log_dir)
 
