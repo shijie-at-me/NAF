@@ -1,4 +1,5 @@
 defaults:
   - train
-dataset: ${dataset.val}
 batch_size: 16
+# Evaluation order must not depend on the run
+shuffle: False
