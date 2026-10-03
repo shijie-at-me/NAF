@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import torch
 from hydra.utils import instantiate
@@ -21,3 +22,12 @@ def save_checkpoint(model, ckpt_dir, step):
     path = os.path.join(ckpt_dir, f"model_{step}steps.pth")
     torch.save(model.state_dict(), path)
     return path
+
+
+def checkpoint_run_name(ckpt_path):
+    """Experiment name of a checkpoint saved by a training run (``output/<exp>/<run>/model.pth`` -> ``<exp>``).
+
+    Empty without a checkpoint or when the path is too short to have one.
+    """
+    parts = Path(ckpt_path).parts if ckpt_path else ()
+    return parts[-3] if len(parts) >= 3 else ""

@@ -1,3 +1,6 @@
+import random
+
+import numpy as np
 import torch
 import torch.utils.checkpoint as checkpoint
 
@@ -67,3 +70,10 @@ def setup_training_optimizations(model, cfg):
 def autocast(device, enabled):
     """bf16 autocast on ``device`` (a no-op context when not ``enabled``)."""
     return torch.autocast(torch.device(device).type, dtype=torch.bfloat16, enabled=enabled)
+
+
+def seed_everything(seed):
+    """Seed the Python, NumPy and PyTorch (CPU and CUDA) random generators."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
