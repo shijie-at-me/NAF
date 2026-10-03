@@ -4,7 +4,6 @@ import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -15,14 +14,16 @@ from utils.backbone import load_multiple_backbones
 from utils.checkpoint import build_model, save_checkpoint
 from utils.config import expand_user_paths
 from utils.data import get_batch, get_dataloaders
-from utils.img import IMAGENET_MEAN, IMAGENET_STD, round_to_nearest_multiple
+from utils.img import normalize_pair, round_to_nearest_multiple
 from utils.log import DualConsole, log_losses, print_run_header
-from utils.training import setup_training_optimizations
+from utils.training import autocast, setup_training_optimizations
 
 LOG_FREQ = 100
+# Side of the guide image given to the upsampler: 4x the target features, at most GUIDE_MAX_SIZE
+GUIDE_MAX_SIZE = 224
 
 
-def get_lr_size(cfg, height, width, patch_size, min_rescale=0.60, max_rescale=0.25):
+def get_lr_size(cfg, height, width, patch_size, min_rescale=0.25, max_rescale=0.60):
     """Size of the low-res input: ``cfg.lr_img_size`` if set, else the image downscaled by ``cfg.down_factor``."""
     if cfg.get("lr_img_size", None) is not None:
         return (cfg.lr_img_size, cfg.lr_img_size)
@@ -52,17 +53,18 @@ def compute_feats(cfg, backbone, image_batch):
     return hr_feats, lr_feats
 
 
-def prepare_images(images, img_size, ups_norm, back_norm):
-    """Resize the batch and normalize it once for the upsampler and once for the backbone."""
-    images = F.interpolate(images, size=img_size, mode="bilinear", align_corners=False)
-    return ups_norm(images), back_norm(images)
+def prepare_images(images, img_size, backbone):
+    """Resize the batch (if needed) and normalize it once for the upsampler and once for the backbone."""
+    if images.shape[-2:] != img_size:
+        images = F.interpolate(images, size=img_size, mode="bilinear", align_corners=False)
+    return normalize_pair(images, backbone)
 
 
 def compute_loss(cfg, model, backbone, criterion, img_ups, img_back):
     """Upsample low-res backbone features and compare them with the high-res ones."""
     hr_feats, lr_feats = compute_feats(cfg, backbone, img_back)
 
-    guide_size = [min(224, v * 4) for v in hr_feats.shape[-2:]]
+    guide_size = [min(GUIDE_MAX_SIZE, v * 4) for v in hr_feats.shape[-2:]]
     img_guide = F.interpolate(img_ups, size=guide_size, mode="bilinear")
     pred_feats = model(img_guide, lr_feats, hr_feats.shape[-2:])
 
@@ -70,15 +72,16 @@ def compute_loss(cfg, model, backbone, criterion, img_ups, img_back):
 
 
 def train_step(cfg, model, backbone, criterion, optimizer, img_ups, img_back, use_bf16):
-    optimizer.zero_grad()
-    with torch.autocast("cuda", enabled=use_bf16, dtype=torch.bfloat16):
+    optimizer.zero_grad(set_to_none=True)
+    with autocast(img_ups.device, use_bf16):
         loss = compute_loss(cfg, model, backbone, criterion, img_ups, img_back)
     loss.backward()
     optimizer.step()
-    return loss
+    return loss.detach()
 
 
 def train(cfg, writer, ckpt_dir, console):
+    """Train for ``cfg.train_steps`` optimizer steps, or until ``cfg.epochs`` passes over the data if that is fewer."""
     # ============ Backbone ============ #
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     backbones, names, _ = load_multiple_backbones(cfg, cfg.backbone, device)
@@ -88,8 +91,6 @@ def train(cfg, writer, ckpt_dir, console):
     console.print(f"\n[bold cyan]Image size: {cfg.img_size}[/bold cyan]")
 
     img_size = (cfg.img_size, cfg.img_size)
-    ups_norm = T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
-    back_norm = T.Normalize(mean=backbone.config["mean"], std=backbone.config["std"])
 
     # ============ Model, optimizer, losses ============ #
     model = build_model(cfg.model, device, cfg.model_ckpt).train()
@@ -99,28 +100,26 @@ def train(cfg, writer, ckpt_dir, console):
     optimizer = instantiate(cfg.optimizer, params=list(model.parameters()))
     criterion = {name: instantiate(loss_cfg) for name, loss_cfg in cfg.loss.items()}
 
-    _, use_bf16, _ = setup_training_optimizations(model, cfg)
+    use_bf16, _ = setup_training_optimizations(model, cfg)
     console.print(f"[bold yellow]Training optimizations: bf16={use_bf16}[/bold yellow]")
 
     # ============ Data ============ #
-    train_dataloader, _ = get_dataloaders(cfg)
+    train_dataloader, _ = get_dataloaders(cfg, val=False)
     console.print(f"[bold cyan]Train Dataset size: {len(train_dataloader.dataset)}[/bold cyan]")
 
     # ============ Training loop ============ #
     num_batches = len(train_dataloader)
-    total_steps = cfg.epochs * cfg.train_steps
-    checkpoint_interval = max(cfg.train_steps // 4, 1)
-    done = False
+    total_steps = min(cfg.train_steps, cfg.epochs * num_batches)
+    checkpoint_interval = max(total_steps // 4, 1)
+    step = 0  # optimizer steps done
 
     for epoch in range(cfg.epochs):
         for batch_idx, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch}")):
-            step = epoch * num_batches + batch_idx
-
             images = get_batch(batch, device)["image"]
-            img_ups, img_back = prepare_images(images, img_size, ups_norm, back_norm)
+            img_ups, img_back = prepare_images(images, img_size, backbone)
             loss = train_step(cfg, model, backbone, criterion, optimizer, img_ups, img_back, use_bf16)
 
-            if batch_idx % LOG_FREQ == 0:
+            if step % LOG_FREQ == 0:
                 prefix = (
                     f"Epoch={epoch}/{cfg.epochs} | "
                     f"Batch={batch_idx}/{num_batches} | "
@@ -129,16 +128,18 @@ def train(cfg, writer, ckpt_dir, console):
                 )
                 log_losses(writer, console, {backbone_name: loss}, optimizer.param_groups[0]["lr"], step, prefix)
 
-            done = step >= cfg.train_steps
-            if (batch_idx % checkpoint_interval == 0 and batch_idx != 0) or done:
+            step += 1
+            if step >= total_steps or cfg.sanity:
+                break
+            if step % checkpoint_interval == 0:
                 console.print(f"Saved checkpoint: {save_checkpoint(model, ckpt_dir, step)}")
 
-            if done or cfg.sanity:
-                break
-
         writer.flush()
-        if done:
+        if step >= total_steps or cfg.sanity:
             break
+
+    # Always keep the final weights, whether the step budget or the data ran out first
+    console.print(f"Saved checkpoint: {save_checkpoint(model, ckpt_dir, step)}")
 
 
 @hydra.main(config_path="config", config_name="base", version_base=None)
