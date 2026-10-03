@@ -1,6 +1,23 @@
 import torch.nn as nn
 
 
+def same_conv(in_channels, out_channels, kernel_size, pad_mode="zeros", bias=True):
+    """Conv2d with "same" padding.
+
+    A 1x1 kernel has no padding, so it uses ``padding_mode="zeros"``: any other mode would still run a
+    (zero-width) padding pass that copies the whole input, which costs time and activation memory.
+    """
+    padding = kernel_size // 2
+    return nn.Conv2d(
+        in_channels,
+        out_channels,
+        kernel_size=kernel_size,
+        padding=padding,
+        padding_mode=pad_mode if padding else "zeros",
+        bias=bias,
+    )
+
+
 # Convolutions
 class EncBlock(nn.Module):
     def __init__(
@@ -20,33 +37,12 @@ class EncBlock(nn.Module):
         norm_kwargs = norm_kwargs or {}
         self.use_conv_shortcut = use_conv_shortcut
         self.norm1 = norm_fn(**norm_kwargs)
-        self.conv1 = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=kernel_size // 2,
-            padding_mode=pad_mode,
-            bias=bias,
-        )
+        self.conv1 = same_conv(in_channels, out_channels, kernel_size, pad_mode=pad_mode, bias=bias)
         self.norm2 = norm_fn(**norm_kwargs)
-        self.conv2 = nn.Conv2d(
-            out_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=kernel_size // 2,
-            padding_mode=pad_mode,
-            bias=bias,
-        )
+        self.conv2 = same_conv(out_channels, out_channels, kernel_size, pad_mode=pad_mode, bias=bias)
         self.activation_fn = activation_fn()
         if in_channels != out_channels:
-            self.shortcut = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=1,
-                padding=0,
-                padding_mode=pad_mode,
-                bias=bias,
-            )
+            self.shortcut = same_conv(in_channels, out_channels, 1, bias=bias)
         self.residual = residual
 
     def forward(self, x):
@@ -66,14 +62,7 @@ class EncBlock(nn.Module):
 
 def encoder(in_dim, hidden_dim, kernel_size=1, ks_res=1, num_layers=2, bias=True, num_groups=8, residual=False):
     return nn.Sequential(
-        nn.Conv2d(
-            in_dim,
-            hidden_dim,
-            kernel_size=kernel_size,
-            padding=kernel_size // 2,
-            padding_mode="reflect",
-            bias=bias,
-        ),
+        same_conv(in_dim, hidden_dim, kernel_size, pad_mode="reflect", bias=bias),
         *[
             EncBlock(
                 hidden_dim,
