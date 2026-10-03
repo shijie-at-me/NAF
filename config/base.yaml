@@ -17,7 +17,6 @@ model_ckpt: null
 
 use_bf16: True
 use_checkpointing: False
-use_scaler: False
 sanity: False
 
 # LR and HR image sizes
