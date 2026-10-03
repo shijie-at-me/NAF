@@ -1,6 +1,6 @@
 defaults:
   - backbone: base
-  - dataset: imagenet
+  - dataset: imagenet_hf
   - dataloader@train_dataloader: train
   - dataloader@val_dataloader: val
   - model: naf
