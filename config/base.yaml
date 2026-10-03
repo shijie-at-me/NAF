@@ -11,7 +11,7 @@ defaults:
 # General parameters
 epochs: 1
 train_steps: 25000
-dataroot: /datasets_local/
+dataroot: ~/Data/datasets
 
 model_ckpt: null
 
