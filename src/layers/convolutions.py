@@ -18,8 +18,9 @@ def same_conv(in_channels, out_channels, kernel_size, pad_mode="zeros", bias=Tru
     )
 
 
-# Convolutions
 class EncBlock(nn.Module):
+    """Pre-activation block: (norm -> act -> conv) x 2, plus an optional residual connection."""
+
     def __init__(
         self,
         in_channels,
@@ -41,26 +42,27 @@ class EncBlock(nn.Module):
         self.norm2 = norm_fn(**norm_kwargs)
         self.conv2 = same_conv(out_channels, out_channels, kernel_size, pad_mode=pad_mode, bias=bias)
         self.activation_fn = activation_fn()
-        if in_channels != out_channels:
+        if use_conv_shortcut or in_channels != out_channels:
             self.shortcut = same_conv(in_channels, out_channels, 1, bias=bias)
         self.residual = residual
 
+    def norm_act_conv(self, x, norm, conv):
+        return conv(self.activation_fn(norm(x)))
+
     def forward(self, x):
-        residual = x
-        x = self.norm1(x)
-        x = self.activation_fn(x)
-        x = self.conv1(x)
-        x = self.norm2(x)
-        x = self.activation_fn(x)
-        x = self.conv2(x)
-        if self.use_conv_shortcut or residual.shape != x.shape:
-            residual = self.shortcut(residual)
-        if self.residual:
-            return x + residual
-        return x
+        out = self.norm_act_conv(x, self.norm1, self.conv1)
+        out = self.norm_act_conv(out, self.norm2, self.conv2)
+        if not self.residual:
+            return out
+
+        # The shortcut is only needed (and only computed) for the residual connection
+        if self.use_conv_shortcut or x.shape != out.shape:
+            x = self.shortcut(x)
+        return out + x
 
 
 def encoder(in_dim, hidden_dim, kernel_size=1, ks_res=1, num_layers=2, bias=True, num_groups=8, residual=False):
+    """Input conv to ``hidden_dim`` followed by ``num_layers`` GroupNorm/SiLU ``EncBlock``s, all reflect-padded."""
     return nn.Sequential(
         same_conv(in_dim, hidden_dim, kernel_size, pad_mode="reflect", bias=bias),
         *[
