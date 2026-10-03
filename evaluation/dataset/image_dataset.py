@@ -13,7 +13,7 @@ from torchvision.datasets import folder
 HF_DATASET_URL = "https://huggingface.co/datasets/"
 DEFAULT_HF_REPO = "ILSVRC/imagenet-1k"
 
-# Split names that the training code asks for but some Hub datasets name differently.
+# Split names that the training code asks for but some datasets name differently.
 SPLIT_ALIASES = {"val": ("validation", "valid"), "validation": ("val", "valid")}
 
 
@@ -40,9 +40,20 @@ def list_samples(root: str, class_to_idx: dict, extensions, is_valid_file, cache
 
     print(f"Walking directory: {root}")
     samples = folder.make_dataset(root, class_to_idx, extensions, is_valid_file)
-    samples = [(os.path.relpath(path, root), idx) for path, idx in samples]
+    # "/" separators so a list written on Windows also works on Linux (and vice versa)
+    samples = [(os.path.relpath(path, root).replace(os.sep, "/"), idx) for path, idx in samples]
     write_sample_list(cache_path, samples)
     return samples
+
+
+def resolve_local_split(root: str, split: str) -> str:
+    """``root/split``, or ``root/<alias>`` if only an alias exists (``val`` -> ``validation`` / ``valid``)."""
+    for candidate in (split, *SPLIT_ALIASES.get(split, ())):
+        path = os.path.join(root, candidate)
+        if os.path.isdir(path):
+            return path
+    available = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+    raise ValueError(f"Split '{split}' not found in {root}, available: {available}")
 
 
 # --- Hugging Face Hub -----------------------------------------------------------------------------------------------
@@ -94,14 +105,17 @@ class BaseImageDataset(Dataset):
 
 
 class ImageDataset(BaseImageDataset):
-    """Class-per-folder image tree (``root/<class>/<image>``) as in torchvision's ``ImageFolder``.
+    """Class-per-folder image tree (``<image dir>/<class>/<image>``) as in torchvision's ``ImageFolder``.
 
-    The file list is cached next to the tree as ``<root_cache or root>.txt`` so later runs skip the directory walk.
+    The image dir is ``root`` itself, or ``root/<split>`` when ``split`` is given (aliases such as ``val`` ->
+    ``validation`` are resolved). Its file list is cached as ``<image dir name>.txt`` in ``root_cache``
+    (default: next to the image dir) so later runs skip the directory walk.
     """
 
     def __init__(
         self,
         root: str,
+        split: str | None = None,
         root_cache: str | None = None,
         loader=folder.default_loader,
         extensions=folder.IMG_EXTENSIONS,
@@ -109,12 +123,16 @@ class ImageDataset(BaseImageDataset):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if split is not None:
+            root = resolve_local_split(root, split)
         self.root = root
+        self.split = split
         self.loader = loader
         self.extensions = extensions
         self.classes, self.class_to_idx = folder.find_classes(root)
 
-        cache_path = (root_cache or root).rstrip("/") + ".txt"
+        image_dir = os.path.normpath(root)
+        cache_path = os.path.join(root_cache or os.path.dirname(image_dir), os.path.basename(image_dir) + ".txt")
         self.samples = list_samples(root, self.class_to_idx, extensions, is_valid_file, cache_path)
         if not self.samples:
             raise RuntimeError(

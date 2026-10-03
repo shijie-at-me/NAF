@@ -1,0 +1,7 @@
+# ImageNet stored locally as class-per-folder images: <root>/<split>/<class>/<image>
+_target_: evaluation.dataset.image_dataset.ImageDataset
+root: ${dataroot}/imagenet-1k
+# Subfolder of root (e.g. train, train-50k); the val loader asks for "val", which also matches "validation"
+split: train
+# Directory for the cached file list (<split>.txt); null keeps it next to the split folder
+root_cache: null
