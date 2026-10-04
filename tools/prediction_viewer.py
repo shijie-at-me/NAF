@@ -129,6 +129,29 @@ def has_oracles(cache_dir, meta):
     return "bilinear" in meta["models"] and os.path.exists(os.path.join(cache_dir, "bilinear_lowres.npy"))
 
 
+# The probe whose classes of the low-res backbone features are shown: bilinear upsampling only averages those
+# features, so its probe reads them in the space it was trained in
+LOWRES_PROBE = "bilinear"
+
+
+@st.cache_resource
+def open_lowres(cache_dir):
+    """Memory-mapped classes of the low-res backbone features under ``LOWRES_PROBE``'s probe, or None."""
+    path = os.path.join(cache_dir, f"{LOWRES_PROBE}_lowres.npy")
+    return np.load(path, mmap_mode="r") if os.path.exists(path) else None
+
+
+def lowres_prediction(cache_dir, index, size):
+    """The low-res classes of image ``index`` enlarged to size x size with nearest neighbors (each token covers its
+    patch), with the low-res grid size; None without a cached low-res prediction."""
+    lowres = open_lowres(cache_dir)
+    if lowres is None:
+        return None, None
+    grid = np.asarray(lowres[index])
+    enlarged = np.asarray(Image.fromarray(grid).resize((size, size), Image.NEAREST))
+    return enlarged, grid.shape
+
+
 @st.cache_resource
 def open_dataset(dataset_cfg_json, size):
     """The val split the predictions were made on, images and labels at ``size``, and its class names."""
@@ -259,14 +282,16 @@ def feature_images(cache_dir, index, models):
 
 
 def draw_features(cache_dir, index, shown):
-    """A row aligned with ``draw_image``'s: the low-res backbone features under the image, then each shown model's
-    upsampled features under its prediction (PCA colors); window oracles have no features."""
+    """A row aligned with ``draw_image``'s: the low-res backbone features under the low-res prediction (under the
+    image without one), then each shown model's upsampled features under its prediction (PCA colors); window
+    oracles have no features."""
     meta, _, _ = open_cache(cache_dir)
     images = feature_images(cache_dir, int(index), tuple(m for m in shown if m in meta["models"]))
-    columns = st.columns(2 + len(shown))
+    has_lowres = open_lowres(cache_dir) is not None
+    columns = st.columns(2 + int(has_lowres) + len(shown))
     backbone = next(iter(images))
-    columns[0].image(images[backbone], caption=f"{backbone} features", width="stretch")
-    for col, m in zip(columns[2:], shown, strict=True):
+    columns[2 if has_lowres else 0].image(images[backbone], caption=f"{backbone} features", width="stretch")
+    for col, m in zip(columns[2 + int(has_lowres) :], shown, strict=True):
         if m in images:
             col.image(images[m], caption=f"{m} features", width="stretch")
 
@@ -354,8 +379,9 @@ def class_legend(label, preds, class_names):
 
 
 def draw_image(cache_dir, index, models, errors, metric="acc", show_legend=False, full=False):
-    """One row: the image index (and the class legend) above the image, ground truth, then every model's prediction
-    (or errors) with its accuracy under ``metric`` (``metrics()``). With ``full``, the image is the original one, the
+    """One row: the image index (and the class legend) above the image, ground truth, the classes of the low-res
+    backbone features (``LOWRES_PROBE``'s probe, before any upsampling), then every model's prediction (or errors),
+    each with its accuracy under ``metric`` (``metrics()``). With ``full``, the image is the original one, the
     evaluated crop framed, and the header names the classes the crop leaves out."""
     meta, labels, preds = open_cache(cache_dir)
     cfg_json = json.dumps(meta["dataset_cfg"], sort_keys=True)
@@ -376,13 +402,19 @@ def draw_image(cache_dir, index, models, errors, metric="acc", show_legend=False
             cut = ", ".join(f"{class_names[c]} {share * 100:.1f}%" for share, c in lost)
             header += f" &nbsp;&nbsp; | &nbsp;&nbsp; **cut by the crop:** {cut}"
     st.markdown(header, unsafe_allow_html=True)
-    columns = st.columns(2 + len(model_preds))
+    lowres, grid = lowres_prediction(cache_dir, int(index), meta["size"])
+    columns = st.columns(2 + int(lowres is not None) + len(model_preds))
     if full:
         columns[0].image(full_image, caption=f"val #{index} (evaluated crop in red)", width="stretch")
     else:
         columns[0].image(image, caption=f"val #{index}", width="stretch")
     columns[1].image(colorize(label), caption="ground truth", width="stretch")
     pixels = scored_pixels(cache_dir, int(index), metric)
+    if lowres is not None:
+        shown = error_overlay(image, label, lowres) if errors else colorize(lowres)
+        name = f"{grid[0]}x{grid[1]} ({LOWRES_PROBE} probe)"
+        columns[2].image(shown, caption=score_caption(name, accuracy(label, lowres, pixels), metric), width="stretch")
+        columns = columns[1:]
     for col, (m, pred) in zip(columns[2:], model_preds.items(), strict=True):
         shown = error_overlay(image, label, pred) if errors else colorize(pred)
         col.image(shown, caption=score_caption(m, accuracy(label, pred, pixels), metric), width="stretch")
