@@ -1,26 +1,18 @@
-"""Probing of upsampled features: the training/evaluation loop shared by the segmentation and depth probes.
+"""The shared training / evaluation loop of the linear probes."""
 
-A 1x1 conv probe is trained on the features of a frozen backbone, upsampled by the evaluated model to the label
-resolution; the upsampler is frozen too unless ``eval.supervise_model`` is set.
-"""
-
-import os
 import random
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from hydra.core.hydra_config import HydraConfig
-from hydra.utils import instantiate, to_absolute_path
-from torch.utils.tensorboard import SummaryWriter
+from hydra.utils import instantiate
 from tqdm import tqdm
 
-from utils.backbone import load_multiple_backbones, upsample_features
-from utils.checkpoint import build_model, checkpoint_run_name
-from utils.config import expand_user_paths
-from utils.data import get_batch, get_dataloaders
-from utils.log import DualConsole, print_run_header
-from utils.training import autocast, seed_everything
+from src.utils.data import get_batch
+from src.utils.training import autocast
+from src.utils.upsampling import upsample_features
+
+__all__ = ["ProbeEvaluator"]
 
 LOG_INTERVAL = 100
 
@@ -157,50 +149,3 @@ class ProbeEvaluator:
     def save_checkpoint(self, path):
         torch.save(self.classifier.state_dict(), path)
         self.console.print(f"[bold green]Training completed. Model saved at: {path}[/bold green]")
-
-    def load_classifier(self, path):
-        self.classifier.load_state_dict(torch.load(path, map_location=self.device))
-        self.console.print(f"Loaded classifier from checkpoint: {path}")
-
-
-def load_upsampler(cfg, model_ckpt, device, console):
-    """The upsampler of ``cfg.model`` with the weights of ``model_ckpt`` (if any), trainable only with
-    ``cfg.eval.supervise_model``; returns ``(model, trainable)``."""
-    model = build_model(cfg.model, device, model_ckpt, weights_only=False)
-    if model_ckpt:
-        console.print(f"[green]Loaded model from checkpoint: {model_ckpt}[/green]")
-    else:
-        console.print("[yellow]No model checkpoint provided, using untrained model[/yellow]")
-    trainable = cfg.eval.get("supervise_model", False)
-    return model.requires_grad_(trainable), trainable
-
-
-def run_probing(cfg, evaluator_cls, task):
-    """Load the backbone, the upsampler and the data described by ``cfg``, then train and evaluate a probe."""
-    expand_user_paths(cfg)
-    seed_everything(cfg.get("seed", 0))
-    # Off by default: autotuning saves ~10% of the training time but the algorithms it picks need ~2x the memory
-    torch.backends.cudnn.benchmark = cfg.get("cudnn_benchmark", False)
-    run_dir = HydraConfig.get().runtime.output_dir
-    model_name = cfg.model.get("name", "base")
-    model_ckpt = to_absolute_path(cfg.eval.model_ckpt) if cfg.eval.model_ckpt else None
-    tag = checkpoint_run_name(model_ckpt)
-
-    writer = SummaryWriter(log_dir=os.path.join(run_dir, "tb"))
-    with DualConsole(os.path.join(run_dir, f"train_{model_name}_{tag}_{task}.log")) as console:
-        print_run_header(console, cfg)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        console.print(f"[bold yellow]Using device: {device}[/bold yellow]")
-        console.print(f"\n[bold cyan]Processing {task} task, image size {cfg.img_size}[/bold cyan]")
-
-        backbones, *_ = load_multiple_backbones(cfg, cfg.backbone, device)
-        model, train_model = load_upsampler(cfg, model_ckpt, device, console)
-
-        train_loader, val_loader = get_dataloaders(cfg, shuffle=False)
-        console.print(f"[bold cyan]Train Dataset size: {len(train_loader.dataset)}[/bold cyan]")
-        console.print(f"[bold cyan]Val Dataset size: {len(val_loader.dataset)}[/bold cyan]")
-
-        evaluator = evaluator_cls(model, backbones[0], device, cfg, writer, console, train_model=train_model)
-        evaluator.fit(train_loader, val_loader)
-        evaluator.save_checkpoint(os.path.join(run_dir, "linear_probe.pth"))
-    writer.close()
