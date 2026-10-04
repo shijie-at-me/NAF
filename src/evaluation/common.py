@@ -3,13 +3,14 @@
 from dataclasses import dataclass
 
 import torch
-from hydra.utils import to_absolute_path
 
+from src.dataset.loading import build_dataloader, build_dataset
+from src.dataset.transforms import build_transforms
 from src.utils.checkpoint import build_model
-from src.utils.data import build_dataloader, build_dataset, build_transforms
+from src.utils.config import launch_path
 from src.utils.log import DualConsole
 
-__all__ = ["RunContext", "checkpoint_arg", "load_upsampler", "split_loader"]
+__all__ = ["RunContext", "load_upsampler", "split_loader"]
 
 
 @dataclass
@@ -21,18 +22,10 @@ class RunContext:
     device: torch.device
 
 
-def checkpoint_arg(path):
-    """A checkpoint given in the config: a URL as is, a path relative to the launch directory made absolute."""
-    if not path:
-        return None
-    path = str(path)
-    return path if path.startswith(("http://", "https://")) else to_absolute_path(path)
-
-
 def load_upsampler(cfg, ctx: RunContext, trainable=False):
     """The upsampler of ``cfg.model`` with the weights of ``cfg.eval.model_ckpt`` (path or URL; null: as built),
     frozen unless ``trainable``; returns ``(model, checkpoint path or URL)``."""
-    model_ckpt = checkpoint_arg(cfg.eval.get("model_ckpt"))
+    model_ckpt = launch_path(cfg.eval.get("model_ckpt"))
     model = build_model(cfg.model, ctx.device, model_ckpt, weights_only=False)
     if model_ckpt:
         ctx.console.print(f"[green]Loaded model from checkpoint: {model_ckpt}[/green]")

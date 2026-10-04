@@ -3,6 +3,6 @@ _target_: torch.utils.data.DataLoader
 batch_size: 4
 shuffle: True
 worker_init_fn:
-  _target_: utils.data.seed_worker
+  _target_: src.dataset.loading.seed_worker
 num_workers: 8
 pin_memory: True

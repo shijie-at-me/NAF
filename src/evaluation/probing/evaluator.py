@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from hydra.utils import instantiate
 from tqdm import tqdm
 
-from src.utils.data import get_batch
+from src.dataset.transforms import get_batch
 from src.utils.training import autocast
 from src.utils.upsampling import upsample_features
 

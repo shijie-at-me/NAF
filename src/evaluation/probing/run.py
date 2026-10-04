@@ -5,7 +5,7 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 from src.backbone import load_backbone
-from src.utils.data import get_dataloaders
+from src.dataset.loading import get_dataloaders
 
 from ..common import RunContext, load_upsampler
 from .probes import PROBES

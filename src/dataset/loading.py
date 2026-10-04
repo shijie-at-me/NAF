@@ -1,39 +1,44 @@
+"""Datasets and data loaders from their configs (``cfg.dataset``, ``cfg.train_dataloader``, ``cfg.val_dataloader``)."""
+
 import random
 
 import numpy as np
 import torch
-import torchvision.transforms as T
 from hydra.utils import instantiate
-from torchvision.transforms.functional import InterpolationMode
+
+from .transforms import build_transforms
+
+__all__ = ["build_dataloader", "build_dataset", "get_dataloaders", "seed_worker"]
+
+# Old dataset modules -> their current ones (most specific first); configs saved with older probes still name them
+LEGACY_DATASET_MODULES = {
+    "evaluation.dataset.image_dataset.": "src.dataset.imagenet.",
+    "evaluation.dataset.": "src.dataset.",
+}
 
 
 def seed_worker(worker_id=None):
+    """``worker_init_fn`` of the loaders: seed NumPy and ``random`` in each worker from its torch seed."""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
 
-def resize_crop(size, interpolation):
-    """Resize the short side to ``size``, then center-crop to ``size`` x ``size``; returns a uint8 tensor."""
-    return T.Compose([T.Resize(size, interpolation=interpolation), T.CenterCrop((size, size)), T.PILToTensor()])
-
-
-def build_transforms(img_size, target_size):
-    """Transforms for images (bilinear) and their dense labels (nearest).
-
-    Both stay uint8: images are converted to float in [0, 1] on the device by ``get_batch``, so workers,
-    shared memory, pinned memory and the host-to-device copy all carry 4x less data than float32.
-    """
-    return {
-        "image": resize_crop(img_size, InterpolationMode.BILINEAR),
-        "label": resize_crop(target_size, InterpolationMode.NEAREST_EXACT),
-    }
+def upgrade_dataset_target(dataset_cfg):
+    """Copy of a dataset config whose ``_target_`` names its current module (see ``LEGACY_DATASET_MODULES``)."""
+    dataset_cfg = dataset_cfg.copy()
+    target = dataset_cfg.get("_target_", "")
+    for old, new in LEGACY_DATASET_MODULES.items():
+        if target.startswith(old):
+            dataset_cfg["_target_"] = new + target.removeprefix(old)
+            break
+    return dataset_cfg
 
 
 def build_dataset(dataset_cfg, transforms, split=None):
     """Instantiate a dataset, switched to ``split`` when given and the dataset has a split."""
+    dataset_cfg = upgrade_dataset_target(dataset_cfg)
     if split is not None and "split" in dataset_cfg:
-        dataset_cfg = dataset_cfg.copy()
         dataset_cfg.split = split
     return instantiate(dataset_cfg, transform=transforms["image"], target_transform=transforms["label"])
 
@@ -67,29 +72,3 @@ def get_dataloaders(cfg, shuffle=True, val=True):
         return train_loader, None
     val_loader = build_dataloader(cfg.val_dataloader, build_dataset(cfg.dataset, transforms, split="val"), shuffle)
     return train_loader, val_loader
-
-
-def to_float_image(image):
-    """uint8 image -> float32 in [0, 1], bit-identical to ``T.ToTensor()``; float images pass through.
-
-    Divides by a 0-dim tensor rather than a Python scalar: CUDA turns scalar division into multiplication by
-    the reciprocal, which is off by one ulp for about half of the values.
-    """
-    if image.dtype != torch.uint8:
-        return image
-    return image.float().div_(torch.full((), 255.0, device=image.device))
-
-
-IMAGE_KEYS = ("image", "clean")
-
-
-def get_batch(batch, device):
-    """Move every tensor of the batch to ``device``; images (``IMAGE_KEYS``) become float32 in [0, 1].
-
-    The copies are asynchronous when the dataloader pins memory; the uint8 -> float conversion runs on the device.
-    """
-    for key, value in batch.items():
-        if isinstance(value, torch.Tensor):
-            value = value.to(device, non_blocking=True)
-            batch[key] = to_float_image(value) if key in IMAGE_KEYS else value
-    return batch

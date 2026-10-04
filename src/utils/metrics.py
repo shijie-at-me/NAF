@@ -3,6 +3,8 @@
 import torch
 import torch.nn.functional as F
 
+from .tensors import to_floats
+
 
 def psnr(pred, target, max_val=1.0):
     """PSNR of every image of the batch: [B] (``inf`` for a perfect prediction)."""
@@ -67,8 +69,7 @@ def depth_metrics(gt, pred, min_depth=1e-3, max_depth=10):
         "log_10": (torch.log10(gt) - torch.log10(pred)).abs().mean(),
         "silog": torch.sqrt(err.square().mean() - err.mean().square()) * 100,
     }
-    # One device-to-host copy for all of them
-    return dict(zip(metrics, torch.stack(list(metrics.values())).tolist(), strict=True))
+    return to_floats(metrics)
 
 
 def confusion_matrix(pred, target, num_classes):
@@ -82,15 +83,19 @@ def confusion_matrix(pred, target, num_classes):
     return torch.bincount(pairs, minlength=num_classes**2).view(num_classes, num_classes)
 
 
-def segmentation_scores(confusion):
-    """Pixel accuracy and mean IoU of a confusion matrix, as torchmetrics' multiclass ``Accuracy`` (micro) and
-    ``JaccardIndex`` (macro): the mean is over the classes found in the targets or the predictions."""
+def class_iou(confusion):
+    """IoU of every class of a confusion matrix [C] (0 for a class absent from both targets and predictions), and
+    whether each class is present [C]."""
     confusion = confusion.double()
     tp = confusion.diag()
     union = confusion.sum(0) + confusion.sum(1) - tp
-    present = union > 0
-    accuracy = tp.sum() / confusion.sum().clamp(min=1)
-    iou = (tp[present] / union[present]).mean() if present.any() else torch.zeros_like(accuracy)
-    # One device-to-host copy for both
-    accuracy, iou = torch.stack([accuracy, iou]).tolist()
-    return {"accuracy": accuracy, "iou": iou}
+    return tp / union.clamp(min=1), union > 0
+
+
+def segmentation_scores(confusion):
+    """Pixel accuracy and mean IoU of a confusion matrix, as torchmetrics' multiclass ``Accuracy`` (micro) and
+    ``JaccardIndex`` (macro): the mean is over the classes found in the targets or the predictions."""
+    iou, present = class_iou(confusion)
+    accuracy = confusion.diag().sum().double() / confusion.sum().clamp(min=1)
+    miou = iou[present].mean() if present.any() else torch.zeros_like(accuracy)
+    return to_floats({"accuracy": accuracy, "iou": miou})

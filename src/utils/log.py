@@ -1,8 +1,11 @@
+"""Run logs: a console mirrored to a file, the run header, and losses to TensorBoard."""
+
 import datetime
 
-import torch
 from omegaconf import DictConfig, OmegaConf
 from rich.console import Console
+
+from .tensors import to_floats
 
 
 class DualConsole:
@@ -39,8 +42,7 @@ def print_run_header(console: DualConsole, cfg: DictConfig, title: str = "Starti
 
 def log_losses(writer, console, losses, lr, step, prefix):
     """Write losses and learning rate to TensorBoard and print a one-line summary."""
-    # A single device-to-host copy for all the losses
-    values = dict(zip(losses, torch.stack([v.detach().float() for v in losses.values()]).tolist(), strict=True))
+    values = to_floats(losses)
     for name, value in values.items():
         writer.add_scalar(f"Loss/{name}", value, step)
     writer.add_scalar("Learning Rate", lr, step)

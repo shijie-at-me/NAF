@@ -77,3 +77,8 @@ def seed_everything(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def count_parameters(model, trainable_only=False):
+    """Number of parameters of ``model`` (only those that require grad with ``trainable_only``)."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad or not trainable_only)

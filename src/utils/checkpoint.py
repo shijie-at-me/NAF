@@ -1,13 +1,15 @@
+"""Checkpoint files: given as a path or a URL (downloaded once to ``WEIGHTS_DIR``), loaded, saved, and models built
+from their config with one."""
+
 import os
-from pathlib import Path
 from urllib.parse import urlparse
 
 import torch
 from hydra.utils import instantiate
 
-# Where downloaded checkpoints are kept: <repo>/weights (git-ignored), or $NAF_WEIGHTS_DIR
-WEIGHTS_DIR = os.environ.get("NAF_WEIGHTS_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "weights"))
-NAF_RELEASE_URL = "https://github.com/valeoai/NAF/releases/download/model/naf_release.pth"
+from src.utils.paths import WEIGHTS_DIR
+
+__all__ = ["build_model", "load_checkpoint", "resolve_checkpoint", "save_checkpoint"]
 
 
 def resolve_checkpoint(ckpt_path):
@@ -22,17 +24,20 @@ def resolve_checkpoint(ckpt_path):
     return path
 
 
-def build_model(model_cfg, device, ckpt_path=None, strict=True, weights_only=True):
-    """Instantiate a model from its config and optionally load a checkpoint (path or URL) into it.
+def load_checkpoint(ckpt_path, device="cpu", weights_only=True):
+    """Contents of a checkpoint given as a path or URL (``resolve_checkpoint``), mapped to ``device``.
 
     ``weights_only=False`` also unpickles non-tensor objects (e.g. the original FeatUp Lightning checkpoints);
     only use it with trusted files.
     """
+    return torch.load(resolve_checkpoint(ckpt_path), map_location=device, weights_only=weights_only)
+
+
+def build_model(model_cfg, device, ckpt_path=None, strict=True, weights_only=True):
+    """Instantiate a model from its config and optionally load a checkpoint (path or URL) into it."""
     model = instantiate(model_cfg).to(device)
     if ckpt_path:
-        model.load_state_dict(
-            torch.load(resolve_checkpoint(ckpt_path), map_location=device, weights_only=weights_only), strict=strict
-        )
+        model.load_state_dict(load_checkpoint(ckpt_path, device, weights_only), strict=strict)
     return model
 
 
@@ -41,12 +46,3 @@ def save_checkpoint(model, ckpt_dir, step):
     path = os.path.join(ckpt_dir, f"model_{step}steps.pth")
     torch.save(model.state_dict(), path)
     return path
-
-
-def checkpoint_run_name(ckpt_path):
-    """Experiment name of a checkpoint saved by a training run (``output/<exp>/<run>/model.pth`` -> ``<exp>``).
-
-    Empty without a checkpoint or when the path is too short to have one.
-    """
-    parts = Path(ckpt_path).parts if ckpt_path else ()
-    return parts[-3] if len(parts) >= 3 else ""

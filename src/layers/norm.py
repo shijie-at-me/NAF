@@ -8,3 +8,14 @@ class CastRMSNorm(nn.RMSNorm):
 
     def forward(self, x):
         return super().forward(x.to(self.weight.dtype)).to(x.dtype)
+
+
+class ChannelNorm(nn.Module):
+    """LayerNorm over the channels of [B, C, H, W] maps."""
+
+    def __init__(self, dim, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x):
+        return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)

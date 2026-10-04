@@ -5,10 +5,8 @@ Port of https://github.com/deepankkumar/PixelUp (MIT License, v0.1.0). The model
 
 import os
 
-import torch
-
 from src.backbone.convnext import DEFAULT_SEMANTIC_ENCODER, SemanticEncoder
-from src.utils.checkpoint import resolve_checkpoint
+from src.utils.checkpoint import load_checkpoint as load_checkpoint_file
 
 RELEASE_URL = "https://github.com/deepankkumar/PixelUp/releases/download/v0.1.0/{}.pth"
 
@@ -49,7 +47,7 @@ def load_checkpoint(checkpoint: str):
     """
     if not checkpoint.endswith(".pth") and not os.path.exists(checkpoint):
         checkpoint = RELEASE_URL.format(checkpoint)
-    return torch.load(resolve_checkpoint(checkpoint), map_location="cpu", weights_only=False)
+    return load_checkpoint_file(checkpoint, "cpu", weights_only=False)
 
 
 def read_embedded_arch(blob) -> dict:
