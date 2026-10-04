@@ -1,5 +1,9 @@
-"""The probe registry: trained probes kept as ``<PROBES_DIR>/<task>/<dataset>/<backbone>/<upsampler>.pth`` with what an
-analysis needs to reuse them (``find_probe`` + ``load_probe``)."""
+"""The probe registry: trained probes kept with the weights of their upsampler, as
+``<WEIGHTS_DIR>/<model>/probes/<task>/<dataset>/<backbone>[@<checkpoint>].pth`` (the upsampler id is
+``<model>[@<checkpoint>]``), with what an analysis needs to reuse them (``find_probe`` + ``load_probe``).
+
+Probes of the older layout, ``<WEIGHTS_DIR>/probes/<task>/<dataset>/<backbone>/<upsampler>.pth``, are still found.
+"""
 
 import datetime
 import glob
@@ -10,11 +14,10 @@ from urllib.parse import urlparse
 import torch
 from omegaconf import OmegaConf
 
-from src.utils.checkpoint import WEIGHTS_DIR, load_checkpoint
+from src.utils.checkpoint import WEIGHTS_DIR, load_checkpoint, model_weights_dir
 from src.utils.run import launch_path
 
 __all__ = [
-    "PROBES_DIR",
     "find_probe",
     "load_probe",
     "probe_meta",
@@ -24,8 +27,6 @@ __all__ = [
     "save_probe",
     "upsampler_id",
 ]
-
-PROBES_DIR = os.path.join(WEIGHTS_DIR, "probes")
 
 
 # ---- probe files ---------------------------------------------------------------------------------------------------
@@ -42,9 +43,11 @@ def upsampler_id(model_cfg, model_ckpt=None):
     return f"{name}@{Path(urlparse(str(ckpt)).path).stem}" if ckpt else name
 
 
-def probe_path(task, dataset, backbone, upsampler, root=PROBES_DIR):
-    """Where the probe of ``upsampler`` on ``backbone`` features is saved for ``task`` on ``dataset``."""
-    return os.path.join(root, task, dataset, backbone, f"{upsampler}.pth")
+def probe_path(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
+    """Where the probe of ``upsampler`` (``<model>[@<checkpoint>]``) on ``backbone`` features is saved for ``task`` on
+    ``dataset``: ``<root>/<model>/probes/<task>/<dataset>/<backbone>[@<checkpoint>].pth``."""
+    model, at, checkpoint = upsampler.partition("@")
+    return os.path.join(model_weights_dir(model, root), "probes", task, dataset, f"{backbone}{at}{checkpoint}.pth")
 
 
 def save_probe(classifier, path, meta):
@@ -54,18 +57,32 @@ def save_probe(classifier, path, meta):
     return path
 
 
-def find_probe(task, dataset, backbone, upsampler, root=PROBES_DIR):
-    """Path of a saved probe; ``upsampler`` may leave out the ``@<checkpoint>`` suffix when a single one matches."""
-    directory = os.path.join(root, task, dataset, backbone)
-    exact = os.path.join(directory, f"{upsampler}.pth")
-    if os.path.exists(exact):
-        return exact
-    matches = sorted(glob.glob(os.path.join(glob.escape(directory), f"{glob.escape(upsampler)}@*.pth")))
-    if len(matches) == 1:
-        return matches[0]
-    available = sorted(Path(p).stem for p in glob.glob(os.path.join(glob.escape(directory), "*.pth")))
-    problem = "is ambiguous" if matches else "not found"
-    raise FileNotFoundError(f"Probe {upsampler!r} {problem} in {directory}; available: {available}")
+def find_probe(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
+    """Path of a saved probe; ``upsampler`` may leave out the ``@<checkpoint>`` suffix when a single one matches.
+
+    Looks in ``probe_path``'s folder, then in the older layout (``<root>/probes/...``).
+    """
+    model = upsampler.partition("@")[0]
+    new_dir = os.path.dirname(probe_path(task, dataset, backbone, model, root))
+    old_dir = os.path.join(root, "probes", task, dataset, backbone)
+    # (folder, file stem of the probe of ``upsampler`` there) in both layouts
+    layouts = [(new_dir, os.path.basename(probe_path(task, dataset, backbone, upsampler, root))[: -len(".pth")])]
+    layouts.append((old_dir, upsampler))
+    for directory, stem in layouts:
+        exact = os.path.join(directory, f"{stem}.pth")
+        if os.path.exists(exact):
+            return exact
+        matches = sorted(glob.glob(os.path.join(glob.escape(directory), f"{glob.escape(stem)}@*.pth")))
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise FileNotFoundError(
+                f"Probe {upsampler!r} is ambiguous in {directory}: {[Path(p).stem for p in matches]}"
+            )
+    available = sorted(
+        Path(p).stem for p in glob.glob(os.path.join(glob.escape(new_dir), f"{glob.escape(backbone)}*.pth"))
+    )
+    raise FileNotFoundError(f"Probe {upsampler!r} not found in {new_dir} (nor in {old_dir}); available: {available}")
 
 
 def load_probe(path, device="cpu"):

@@ -8,7 +8,7 @@ load as they are. Differences from the original:
   original needs NATTEN < 0.20 for the split ``na2d_qk`` / ``na2d_av`` kernels of its decoder, which averages the
   softmax weights over heads before applying them to the values; the fallback does that directly on the low-res
   values (no upsampled copy of them, no chunking over value channels).
-- ``checkpoint`` may be a URL (downloaded once to ``weights/``) and the Semantic Encoder weights must come
+- ``checkpoint`` may be a URL (downloaded once to ``weights/pixelup/``) and the Semantic Encoder weights must come
   from the checkpoint (the released ones carry them) or from a local Hugging Face snapshot dir.
 - Without autograd, the full-resolution tensors are updated in place, each one is released as soon as the next
   exists, and the decoder writes its float32 output directly: the same results with a lower peak memory.

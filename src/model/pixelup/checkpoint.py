@@ -44,11 +44,11 @@ _LEGACY_ARCH_FIELDS = {
 def load_checkpoint(checkpoint: str):
     """Load a PixelUp checkpoint given as a path, a URL, or the name of a release asset (e.g. "pixelup_convnext_s").
 
-    URLs are downloaded once to the torch hub cache. The checkpoints hold their architecture next to the weights.
+    URLs are downloaded once to ``weights/pixelup/``. The checkpoints hold their architecture next to the weights.
     """
     if not checkpoint.endswith(".pth") and not os.path.exists(checkpoint):
         checkpoint = RELEASE_URL.format(checkpoint)
-    return load_checkpoint_file(checkpoint, "cpu", weights_only=False)
+    return load_checkpoint_file(checkpoint, "cpu", weights_only=False, model="pixelup")
 
 
 def read_embedded_arch(blob) -> dict:
