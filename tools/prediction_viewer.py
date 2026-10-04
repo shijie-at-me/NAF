@@ -23,6 +23,7 @@ import sys
 import numpy as np
 import pandas as pd
 import streamlit as st
+from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -150,6 +151,53 @@ def palette():
     return pascal_palette()
 
 
+@st.cache_resource
+def open_raw_dataset(dataset_cfg_json):
+    """The same val split without transforms: the images and labels at their original size."""
+    from omegaconf import OmegaConf
+
+    import hydra_plugins.resolvers  # noqa: F401  (config resolvers)
+    from src.dataset.loading import build_dataset
+    from src.utils.run import expand_user_paths
+
+    cfg = expand_user_paths(OmegaConf.create(json.loads(dataset_cfg_json)))
+    return build_dataset(cfg, {"image": None, "label": None}, split="val")
+
+
+def crop_box(width, height, size):
+    """The square the predictions cover, in original pixels: torchvision's ``Resize(size)`` (short side to ``size``)
+    then ``CenterCrop(size)``, as ``src.dataset.transforms.resize_crop``; (left, top, right, bottom)."""
+    short, long = min(width, height), max(width, height)
+    resized_long = int(size * long / short)
+    resized_w, resized_h = (size, resized_long) if width <= height else (resized_long, size)
+    left, top = int(round((resized_w - size) / 2.0)), int(round((resized_h - size) / 2.0))
+    scale = short / size
+    return left * scale, top * scale, (left + size) * scale, (top + size) * scale
+
+
+@st.cache_data(max_entries=256)
+def load_full_image(dataset_cfg_json, size, index):
+    """The original image ``index`` with what the center crop leaves out dimmed and the crop framed in red ([h, w, 3]
+    uint8), and the share of the original pixels of each class outside the crop: dict class id -> share."""
+    from PIL import ImageDraw
+
+    item = open_raw_dataset(dataset_cfg_json)[index]
+    image = item["image"]
+    width, height = image.size
+    left, top, right, bottom = crop_box(width, height, size)
+    array = np.asarray(image).astype(np.float32)
+    outside = np.ones((height, width), bool)
+    outside[int(round(top)) : int(round(bottom)), int(round(left)) : int(round(right))] = False
+    array[outside] *= 0.35
+    framed = Image.fromarray(array.astype(np.uint8))
+    line = max(2, round(min(width, height) / 120))
+    ImageDraw.Draw(framed).rectangle((left, top, right - 1, bottom - 1), outline=(255, 0, 0), width=line)
+    label = np.asarray(item["label"])
+    classes, counts = np.unique(label[outside], return_counts=True)
+    lost = {int(c): n / label.size for c, n in zip(classes, counts, strict=True) if c != VOID}
+    return np.asarray(framed), lost
+
+
 @st.cache_data(max_entries=256)
 def load_image(dataset_cfg_json, size, index):
     """The val image ``index`` as an [S, S, 3] uint8 array."""
@@ -210,17 +258,17 @@ def feature_images(cache_dir, index, models):
     return images
 
 
-def draw_features(cache_dir, index, shown, width):
+def draw_features(cache_dir, index, shown):
     """A row aligned with ``draw_image``'s: the low-res backbone features under the image, then each shown model's
     upsampled features under its prediction (PCA colors); window oracles have no features."""
     meta, _, _ = open_cache(cache_dir)
     images = feature_images(cache_dir, int(index), tuple(m for m in shown if m in meta["models"]))
     columns = st.columns(2 + len(shown))
     backbone = next(iter(images))
-    columns[0].image(images[backbone], caption=f"{backbone} features", width=width)
+    columns[0].image(images[backbone], caption=f"{backbone} features", width="stretch")
     for col, m in zip(columns[2:], shown, strict=True):
         if m in images:
-            col.image(images[m], caption=f"{m} features", width=width)
+            col.image(images[m], caption=f"{m} features", width="stretch")
 
 
 # ---- drawing -------------------------------------------------------------------------------------------------------
@@ -305,9 +353,10 @@ def class_legend(label, preds, class_names):
     return line
 
 
-def draw_image(cache_dir, index, models, errors, width, metric="acc", show_legend=False):
+def draw_image(cache_dir, index, models, errors, metric="acc", show_legend=False, full=False):
     """One row: the image index (and the class legend) above the image, ground truth, then every model's prediction
-    (or errors) with its accuracy under ``metric`` (``metrics()``)."""
+    (or errors) with its accuracy under ``metric`` (``metrics()``). With ``full``, the image is the original one, the
+    evaluated crop framed, and the header names the classes the crop leaves out."""
     meta, labels, preds = open_cache(cache_dir)
     cfg_json = json.dumps(meta["dataset_cfg"], sort_keys=True)
     image = load_image(cfg_json, meta["size"], int(index))
@@ -315,18 +364,28 @@ def draw_image(cache_dir, index, models, errors, width, metric="acc", show_legen
     model_preds = {
         m: np.asarray(preds[m][index]) if m in preds else oracle_prediction(cache_dir, m, int(index)) for m in models
     }
+    _, class_names = open_dataset(cfg_json, meta["size"])
     header = f"**val #{index}**"
     if show_legend:
-        _, class_names = open_dataset(cfg_json, meta["size"])
         header += " &nbsp;&nbsp; " + class_legend(label, model_preds, class_names)
+    if full:
+        full_image, lost = load_full_image(cfg_json, meta["size"], int(index))
+        # Objects only: the background the crop leaves out is no loss worth flagging
+        lost = sorted(((share, c) for c, share in lost.items() if c != 0 and share >= 0.001), reverse=True)
+        if lost:
+            cut = ", ".join(f"{class_names[c]} {share * 100:.1f}%" for share, c in lost)
+            header += f" &nbsp;&nbsp; | &nbsp;&nbsp; **cut by the crop:** {cut}"
     st.markdown(header, unsafe_allow_html=True)
     columns = st.columns(2 + len(model_preds))
-    columns[0].image(image, caption=f"val #{index}", width=width)
-    columns[1].image(colorize(label), caption="ground truth", width=width)
+    if full:
+        columns[0].image(full_image, caption=f"val #{index} (evaluated crop in red)", width="stretch")
+    else:
+        columns[0].image(image, caption=f"val #{index}", width="stretch")
+    columns[1].image(colorize(label), caption="ground truth", width="stretch")
     pixels = scored_pixels(cache_dir, int(index), metric)
     for col, (m, pred) in zip(columns[2:], model_preds.items(), strict=True):
         shown = error_overlay(image, label, pred) if errors else colorize(pred)
-        col.image(shown, caption=score_caption(m, accuracy(label, pred, pixels), metric), width=width)
+        col.image(shown, caption=score_caption(m, accuracy(label, pred, pixels), metric), width="stretch")
 
 
 # ---- page ----------------------------------------------------------------------------------------------------------
@@ -379,7 +438,13 @@ def images_page(cache_dir, meta, per_image):
         key="image_table",
     )
 
-    d1, d2, d3, d4, d5 = st.columns([1, 1, 1, 1, 2])
+    d0, d1, d2, d3, d4 = st.columns([1, 1, 1, 1, 2])
+    full = d0.toggle(
+        "Original image",
+        value=True,
+        help="The whole image before the center crop, the evaluated square framed in red: the predictions, labels "
+        "and scores only cover that square",
+    )
     errors = d1.toggle("Show errors", value=False)
     legend = d2.toggle("Class legend", value=True)
     features = d3.toggle(
@@ -388,24 +453,23 @@ def images_page(cache_dir, meta, per_image):
         help="A second row under every image: PCA colors of the backbone's low-res features and of each model's "
         "upsampled features, computed by the models (the first time loads them on the GPU, ~15 s)",
     )
-    width = d4.select_slider("Size", options=[160, 224, 320, 448], value=224)
-    page_size = d5.select_slider("Images per page", options=[4, 8, 16, 32], value=8)
+    page_size = d4.select_slider("Images per page", options=[4, 8, 16, 32], value=32)
 
     selected = event.selection.rows
     if selected:
         index = int(table.loc[selected[0], "image"])
         st.subheader("Selected image")
-        draw_image(cache_dir, index, shown, errors, width=448, metric=metric, show_legend=True)
+        draw_image(cache_dir, index, shown, errors, metric=metric, show_legend=True, full=full)
         if features:
-            draw_features(cache_dir, index, shown, width=448)
+            draw_features(cache_dir, index, shown)
         st.divider()
 
     pages = max(1, (len(table) + page_size - 1) // page_size)
     page = st.number_input("Page", min_value=1, max_value=pages, value=1, step=1) - 1
     for _, row in table.iloc[page * page_size : (page + 1) * page_size].iterrows():
-        draw_image(cache_dir, int(row["image"]), shown, errors, width, metric=metric, show_legend=legend)
+        draw_image(cache_dir, int(row["image"]), shown, errors, metric=metric, show_legend=legend, full=full)
         if features:
-            draw_features(cache_dir, int(row["image"]), shown, width)
+            draw_features(cache_dir, int(row["image"]), shown)
 
 
 def main():
