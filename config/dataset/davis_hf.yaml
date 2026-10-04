@@ -1,0 +1,10 @@
+_target_: src.dataset.davis.HFDAVIS
+tag: "davis"
+# Hub repo id or URL: one row per frame (id, video, frame, image, mask), the frames of a video contiguous
+repo: shijli/davis2017
+# semi-supervised: the official 480p trainval set, 60 train / 30 val videos
+name: semi-supervised
+split: "train"
+# null uses $HF_HOME/datasets
+cache_dir: null
+num_proc: null
