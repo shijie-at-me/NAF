@@ -95,6 +95,10 @@ class NAF(BaseUpsampler):
         )
         self.upsampler = CrossAttention(dim=dim, num_heads=heads_attn, kernel_size=(kernel_size, kernel_size))
 
+    def encode(self, image, output_size):
+        """The queries: the guide ``image`` encoded at ``output_size``, position-encoded: [B, dim, *output_size]."""
+        return self.image_encoder(image, output_size=output_size)
+
     def forward(self, image, features, output_size, return_weights=False, *args, **kwargs):
         """Upsample ``features`` to ``output_size`` guided by ``image``.
 
@@ -102,6 +106,6 @@ class NAF(BaseUpsampler):
         resolution of ``features``, which are the values. Returns ``(out, attn_weights)`` if
         ``return_weights``.
         """
-        queries = self.image_encoder(image, output_size=output_size)
+        queries = self.encode(image, output_size)
         keys = F.adaptive_avg_pool2d(queries, output_size=features.shape[-2:])
         return self.upsampler(queries, keys, features, image, return_weights=return_weights)

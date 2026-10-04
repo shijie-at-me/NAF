@@ -182,6 +182,15 @@ class PixelUp(BaseUpsampler):
             q_2d = F.interpolate(enc, size=output_size, mode="bilinear", align_corners=False)
         return q_2d, k_2d
 
+    def encode(self, image, output_size):
+        """The decoder's query encoding of the guide ``image`` (ImageNet-normalized) for ``output_size``: the
+        pixel-encoder queries refined by the Semantic Encoder stages, smoothed and position-encoded."""
+        # The Semantic Encoder and the pixel encoder both see the image at semantic_scale x the output size
+        x_norm = self._semantic_input(image, output_size)
+        q = self._chain(x_norm, self.semantic_encoder(x_norm), output_size)
+        del x_norm
+        return self.rope(self.smooth(q))
+
     def forward(self, image, features, output_size, *args, **kwargs):
         """``image``: ImageNet-normalized guide (any size); ``features``: [B, C, h, w] backbone features."""
         output_size = (int(output_size[0]), int(output_size[1]))
@@ -192,11 +201,7 @@ class PixelUp(BaseUpsampler):
             big = self.forward(image, features, (output_size[0] * k, output_size[1] * k), *args, **kwargs)
             return F.adaptive_avg_pool2d(big, output_size)
 
-        # The Semantic Encoder and the pixel encoder both see the image at semantic_scale x the output size
-        x_norm = self._semantic_input(image, output_size)
-        q = self._chain(x_norm, self.semantic_encoder(x_norm), output_size)
-        enc = self.rope(self.smooth(q))
-        del q, x_norm
+        enc = self.encode(image, output_size)
 
         # The full-resolution intermediates are released as soon as the next one exists
         q_2d, k_2d = self._decoder_grids(enc, tuple(features.shape[-2:]), output_size)

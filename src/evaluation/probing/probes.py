@@ -80,5 +80,5 @@ class DepthProbe(ProbeEvaluator):
         return {name: total / max(self.num_images, 1) for name, total in self.metric_sums.items()}
 
 
-# eval.task -> probe; the task name also files the trained probes (weights/<model>/probes/<task>/...)
+# eval.task -> probe; the task name also starts the names of the trained probes (weights/<model>/probes/<task>_...)
 PROBES = {"seg": SegmentationProbe, "depth": DepthProbe}

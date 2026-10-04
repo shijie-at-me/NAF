@@ -1,8 +1,13 @@
-"""The probe registry: trained probes kept with the weights of their upsampler, as
-``<WEIGHTS_DIR>/<model>/probes/<task>/<dataset>/<backbone>[@<checkpoint>].pth`` (the upsampler id is
-``<model>[@<checkpoint>]``), with what an analysis needs to reuse them (``find_probe`` + ``load_probe``).
+"""The probe registry: trained probes kept with the weights of their upsampler, one flat folder per model, as
+``<WEIGHTS_DIR>/<model>/probes/<task>_<dataset>_<backbone>[@<checkpoint>].pth``, e.g.
+``weights/pixelup/probes/seg_voc_dinov3-b16@convnext_s.pth``:
 
-Probes of the older layout, ``<WEIGHTS_DIR>/probes/<task>/<dataset>/<backbone>/<upsampler>.pth``, are still found.
+- ``backbone`` is the backbone's short name (``src.backbone.registry.short_name``: ``dinov3-b16``);
+- ``checkpoint`` is the upsampler's weights file stem without the ``<model>_`` prefix (``pixelup_convnext_s`` ->
+  ``convnext_s``), absent for upsamplers without weights (bilinear, nearest).
+
+Each file also holds the full names, the configs and the metrics (``probe_meta``). ``find_probe`` + ``load_probe``
+get a probe back for an analysis.
 """
 
 import datetime
@@ -14,6 +19,7 @@ from urllib.parse import urlparse
 import torch
 from omegaconf import OmegaConf
 
+from src.backbone.registry import short_name
 from src.utils.checkpoint import WEIGHTS_DIR, load_checkpoint, model_weights_dir
 from src.utils.run import launch_path
 
@@ -43,11 +49,26 @@ def upsampler_id(model_cfg, model_ckpt=None):
     return f"{name}@{Path(urlparse(str(ckpt)).path).stem}" if ckpt else name
 
 
+def split_upsampler(upsampler):
+    """``"<model>[@<checkpoint>]"`` -> ``(model, checkpoint tag)``: the checkpoint without its ``<model>_`` prefix
+    (``"naf@naf_release"`` and ``"naf@release"`` -> ``("naf", "release")``), "" without checkpoint."""
+    model, _, checkpoint = upsampler.partition("@")
+    return model, checkpoint.removeprefix(f"{model}_")
+
+
+def probe_name(task, dataset, backbone, checkpoint=""):
+    """File stem of a probe: ``<task>_<dataset>_<backbone short name>[@<checkpoint tag>]``."""
+    stem = f"{task}_{dataset}_{short_name(backbone)}"
+    return f"{stem}@{checkpoint}" if checkpoint else stem
+
+
 def probe_path(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
     """Where the probe of ``upsampler`` (``<model>[@<checkpoint>]``) on ``backbone`` features is saved for ``task`` on
-    ``dataset``: ``<root>/<model>/probes/<task>/<dataset>/<backbone>[@<checkpoint>].pth``."""
-    model, at, checkpoint = upsampler.partition("@")
-    return os.path.join(model_weights_dir(model, root), "probes", task, dataset, f"{backbone}{at}{checkpoint}.pth")
+    ``dataset``: ``<root>/<model>/probes/<task>_<dataset>_<backbone>[@<checkpoint>].pth``."""
+    model, checkpoint = split_upsampler(upsampler)
+    return os.path.join(
+        model_weights_dir(model, root), "probes", probe_name(task, dataset, backbone, checkpoint) + ".pth"
+    )
 
 
 def save_probe(classifier, path, meta):
@@ -60,29 +81,18 @@ def save_probe(classifier, path, meta):
 def find_probe(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
     """Path of a saved probe; ``upsampler`` may leave out the ``@<checkpoint>`` suffix when a single one matches.
 
-    Looks in ``probe_path``'s folder, then in the older layout (``<root>/probes/...``).
+    ``backbone`` may be the full or the short name, and the checkpoint the file stem or its tag (``naf@release``).
     """
-    model = upsampler.partition("@")[0]
-    new_dir = os.path.dirname(probe_path(task, dataset, backbone, model, root))
-    old_dir = os.path.join(root, "probes", task, dataset, backbone)
-    # (folder, file stem of the probe of ``upsampler`` there) in both layouts
-    layouts = [(new_dir, os.path.basename(probe_path(task, dataset, backbone, upsampler, root))[: -len(".pth")])]
-    layouts.append((old_dir, upsampler))
-    for directory, stem in layouts:
-        exact = os.path.join(directory, f"{stem}.pth")
-        if os.path.exists(exact):
-            return exact
-        matches = sorted(glob.glob(os.path.join(glob.escape(directory), f"{glob.escape(stem)}@*.pth")))
-        if len(matches) == 1:
-            return matches[0]
-        if matches:
-            raise FileNotFoundError(
-                f"Probe {upsampler!r} is ambiguous in {directory}: {[Path(p).stem for p in matches]}"
-            )
-    available = sorted(
-        Path(p).stem for p in glob.glob(os.path.join(glob.escape(new_dir), f"{glob.escape(backbone)}*.pth"))
-    )
-    raise FileNotFoundError(f"Probe {upsampler!r} not found in {new_dir} (nor in {old_dir}); available: {available}")
+    path = probe_path(task, dataset, backbone, upsampler, root)
+    if os.path.exists(path):
+        return path
+    directory, stem = os.path.dirname(path), Path(path).stem
+    matches = sorted(glob.glob(os.path.join(glob.escape(directory), f"{glob.escape(stem)}@*.pth")))
+    if len(matches) == 1:
+        return matches[0]
+    available = sorted(Path(p).stem for p in glob.glob(os.path.join(glob.escape(directory), "*.pth")))
+    problem = "is ambiguous" if matches else "not found"
+    raise FileNotFoundError(f"Probe {stem!r} {problem} in {directory}; available: {available}")
 
 
 def load_probe(path, device="cpu"):

@@ -1,38 +1,29 @@
-"""What the code knows about a backbone from its name alone: family, fine-tune tag, patch size, feature dim, and
-which timm options it supports.
+"""What the code knows about a backbone from its name alone: family, fine-tune tag, patch size, feature dim, short
+name, and which timm options it supports.
 
 Pure Python (no torch / timm import), so that config resolvers can use it at Hydra startup for free.
 """
 
 import re
 
-# Backbones tested with the upsamplers (timm names, or torch.hub ones); more are available in timm.
-MODEL_LIST = [
-    # DINO
-    "vit_base_patch16_224.dino",
-    # DINOv2
-    "vit_base_patch14_dinov2.lvd142m",
-    # DINOv2-R
-    "vit_base_patch14_reg4_dinov2",
-    # Franca
-    "franca_vitb14",
-    # DINOv3-ViT
-    "vit_base_patch16_dinov3.lvd1689m",
-    "vit_large_patch16_dinov3.lvd1689m",
-    "vit_7b_patch16_dinov3.lvd1689m",
-    # SigLIP2
-    "vit_base_patch16_siglip_512.v2_webli",
-    # PE Core
-    "vit_pe_core_small_patch16_384.fb",
-    # PE Spatial
-    "vit_pe_spatial_tiny_patch16_512.fb",
-    # RADIO
-    "radio_v2.5-b",
-    # CAPI
-    "capi_vitl14_lvd",
-    # MAE
-    "vit_large_patch16_224.mae",
-]
+# Backbones tested with the upsamplers (timm names, or torch.hub ones) -> their short name in file names (probes in
+# weights/<model>/probes/); more are available in timm. Short names have no "_", so that file names split on it.
+SHORT_NAMES = {
+    "vit_base_patch16_224.dino": "dino-b16",
+    "vit_base_patch14_dinov2.lvd142m": "dinov2-b14",
+    "vit_base_patch14_reg4_dinov2": "dinov2r-b14",
+    "franca_vitb14": "franca-b14",
+    "vit_base_patch16_dinov3.lvd1689m": "dinov3-b16",
+    "vit_large_patch16_dinov3.lvd1689m": "dinov3-l16",
+    "vit_7b_patch16_dinov3.lvd1689m": "dinov3-7b16",
+    "vit_base_patch16_siglip_512.v2_webli": "siglip2-b16",
+    "vit_pe_core_small_patch16_384.fb": "pecore-s16",
+    "vit_pe_spatial_tiny_patch16_512.fb": "pespatial-t16",
+    "radio_v2.5-b": "radio2.5-b16",
+    "capi_vitl14_lvd": "capi-l14",
+    "vit_large_patch16_224.mae": "mae-l16",
+}
+MODEL_LIST = list(SHORT_NAMES)
 
 # Name prefixes marking fine-tuned weights to load on top of the pretrained backbone, e.g. "dvt_vit_base_patch14_dinov2"
 FINETUNE_TAGS = ("dvt", "fit3d")
@@ -59,6 +50,17 @@ def split_finetune_tag(name: str) -> tuple[str | None, str]:
         if name.startswith(f"{tag}_"):
             return tag, name.removeprefix(f"{tag}_")
     return None, name
+
+
+def short_name(name: str) -> str:
+    """Short name of a backbone for file names: ``SHORT_NAMES`` (``vit_base_patch16_dinov3.lvd1689m`` -> ``dinov3-b16``),
+    fine-tune tag kept (``dvt_vit_base_patch14_dinov2`` -> ``dvt-...``); other names with "_" turned into "-".
+
+    A short name maps to itself, so names and short names can be given alike.
+    """
+    tag, model_name = split_finetune_tag(name)
+    short = SHORT_NAMES.get(model_name, model_name.replace("_", "-"))
+    return f"{tag}-{short}" if tag else short
 
 
 def get_backbone_family(name: str) -> str:

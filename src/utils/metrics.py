@@ -9,6 +9,7 @@ __all__ = [
     "confusion_matrix",
     "depth_metrics",
     "gaussian_window",
+    "grouped_confusion_matrix",
     "psnr",
     "segmentation_scores",
     "ssim",
@@ -103,6 +104,16 @@ def confusion_matrix(pred, target, num_classes):
     valid = (target >= 0) & (target < num_classes)
     pairs = target[valid].long() * num_classes + pred[valid].long()
     return torch.bincount(pairs, minlength=num_classes**2).view(num_classes, num_classes)
+
+
+def grouped_confusion_matrix(pred, target, group, num_groups, num_classes):
+    """``confusion_matrix`` of every group of pixels: [num_groups, num_classes, num_classes] int64.
+
+    ``group`` (same shape as ``target``) is the group index of every pixel, in [0, num_groups).
+    """
+    valid = (target >= 0) & (target < num_classes)
+    keys = (group[valid].long() * num_classes + target[valid].long()) * num_classes + pred[valid].long()
+    return torch.bincount(keys, minlength=num_groups * num_classes**2).view(num_groups, num_classes, num_classes)
 
 
 def class_iou(confusion):
