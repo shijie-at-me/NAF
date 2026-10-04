@@ -1,0 +1,19 @@
+# @package _global_
+# Predictions of the probed upsamplers on the val split, cached for the analyses that only need predictions
+# (src/analysis/predictions.py; read by error_breakdown and load_predictions). Runs the upsamplers whose probes
+# ``python evaluation.py task=seg_probe`` registered in weights/<model>/probes/
+analysis:
+  # Probes to load: weights/<model>/probes/<task>_<dataset>_<backbone short name>[@<checkpoint>].pth
+  probes:
+    task: seg
+    dataset: voc
+    backbone: vit_base_patch16_dinov3.lvd1689m
+  models: [bilinear, nearest, naf, pixelup, anyup]
+  # Val images to predict, the first ones of the split (null: all)
+  max_images: null
+  # Cache folder (null: output/predictions/<task>_<dataset>_<backbone short name>)
+  out: null
+
+hydra:
+  run:
+    dir: ./output/${exp_name}/${analysis.probes.dataset}_${analysis.probes.backbone}/${now:%Y-%m-%d_%H-%M-%S}
