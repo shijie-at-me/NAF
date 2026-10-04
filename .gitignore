@@ -27,8 +27,9 @@ htmlcov/
 Thumbs.db
 *.nfs*
 
-# Project data and outputs
+# Project data, downloaded weights and outputs
 data/
+weights/
 output/
 outputs/
 multirun/

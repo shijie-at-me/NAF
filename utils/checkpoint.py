@@ -5,13 +5,17 @@ from urllib.parse import urlparse
 import torch
 from hydra.utils import instantiate
 
+# Where downloaded checkpoints are kept: <repo>/weights (git-ignored), or $NAF_WEIGHTS_DIR
+WEIGHTS_DIR = os.environ.get("NAF_WEIGHTS_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "weights"))
+NAF_RELEASE_URL = "https://github.com/valeoai/NAF/releases/download/model/naf_release.pth"
+
 
 def resolve_checkpoint(ckpt_path):
     """Local path of a checkpoint given as a path (``~`` expanded) or an http(s) URL; URLs are downloaded once to
-    ``<torch hub dir>/checkpoints``, the cache of ``torch.hub.load_state_dict_from_url``."""
+    ``WEIGHTS_DIR`` under their file name."""
     if not ckpt_path.startswith(("http://", "https://")):
         return os.path.expanduser(ckpt_path)
-    path = os.path.join(torch.hub.get_dir(), "checkpoints", os.path.basename(urlparse(ckpt_path).path))
+    path = os.path.join(WEIGHTS_DIR, os.path.basename(urlparse(ckpt_path).path))
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.hub.download_url_to_file(ckpt_path, path)
