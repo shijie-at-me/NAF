@@ -27,7 +27,7 @@ from src.evaluation.probing.registry import find_probe, probe_name
 from src.utils.checkpoint import ROOT, WEIGHTS_DIR
 from src.utils.run import launch_path
 
-from .pixels import boundary_distance
+from .pixels import BUCKETS, boundary_distance, own_class_fraction, region_width_area
 from .shared import ValSplit, load_sample, load_setup, load_val_split, model_predictions, predict, window_oracle
 
 __all__ = [
@@ -37,7 +37,9 @@ __all__ = [
     "cache_dir",
     "load_predictions",
     "oracle_prediction",
+    "PIXEL_SUBSETS",
     "per_image_accuracy",
+    "pixel_subsets",
     "prediction_source",
     "run_predictions",
     "write_predictions",
@@ -47,6 +49,15 @@ PREDICTIONS_DIR = os.path.join(ROOT, "output", "predictions")
 VOID = 255  # label of the void pixels, so at most 255 classes fit in uint8
 # Pixels "near an edge": closer than this to a boundary, error_breakdown's bands [0,2) and [2,4)
 EDGE_DISTANCE = 4
+
+# Pixel subsets of the per-image accuracies (name -> what they are), the first bucket of error_breakdown's groupings
+PIXEL_SUBSETS = {
+    "acc": "all labeled pixels",
+    "edge_acc": "near edges (< 4 px from a boundary)",
+    "thin_acc": "thin structures (regions < 8 px wide)",
+    "minority_acc": "minority pixels (class < 25% of their patch)",
+    "small_acc": "small regions (< 32x32 px)",
+}
 
 
 def cache_dir(probes, root=PREDICTIONS_DIR):
@@ -196,22 +207,39 @@ def oracle_prediction(predictions, kernel, index, reference="bilinear"):
     return window_oracle(lr_pred, label, fallback, kernel).to(torch.uint8).numpy()
 
 
+def pixel_subsets(label, num_classes, lr_size):
+    """Masks of the labeled pixels of a label map ([H, W] tensor, on the CPU) in every subset of ``PIXEL_SUBSETS``,
+    defined as error_breakdown's groups (``pixels``): dict name -> [H, W] bool."""
+    valid = label != VOID
+    width, area = (torch.from_numpy(a) for a in region_width_area(label.numpy()))
+    own_frac = own_class_fraction(label[None], num_classes, lr_size)[0]
+    return {
+        "acc": valid,
+        "edge_acc": valid & (boundary_distance(label[None])[0] < EDGE_DISTANCE),
+        "thin_acc": valid & (width < BUCKETS["width"][0][0]),
+        "minority_acc": valid & (own_frac < BUCKETS["own_frac"][0][0]),
+        "small_acc": valid & (area < BUCKETS["area"][0][0]),
+    }
+
+
 def per_image_accuracy(predictions, models=None):
-    """Accuracy of every cached image for every model (None: all), as error_breakdown's per_image.npz:
-    ``acc_<model>`` over the labeled pixels, ``edge_acc_<model>`` over those closer than ``EDGE_DISTANCE`` to a
-    boundary (``pixels.boundary_distance``: class changes and void pixels), NaN without such pixels; [N] float64."""
+    """Accuracy of every cached image for every model (None: all) over every pixel subset of ``PIXEL_SUBSETS``:
+    ``<subset>_<model>`` (``acc_naf``, ``thin_acc_naf``, ...; NaN without such pixels), and the number of pixels of
+    each subset ``n_<subset>``; [N] arrays. ``acc`` and ``edge_acc`` are error_breakdown's per_image.npz."""
     models = list(predictions.preds if models is None else models)
-    n = predictions.num_images
-    out = {f"{metric}_{m}": np.empty(n) for metric in ("acc", "edge_acc") for m in models}
+    n, meta = predictions.num_images, predictions.meta
+    out = {f"{subset}_{m}": np.empty(n) for subset in PIXEL_SUBSETS for m in models}
+    out |= {f"n_{subset}": np.empty(n, dtype=np.int64) for subset in PIXEL_SUBSETS}
     for i in range(n):
         label = torch.from_numpy(np.array(predictions.labels[i]))
-        valid = label != VOID
-        near_edge = valid & (boundary_distance(label[None])[0] < EDGE_DISTANCE)
+        subsets = pixel_subsets(label, meta["num_classes"], tuple(meta["lr_size"]))
         lab = label.long()
+        for subset, mask in subsets.items():
+            out[f"n_{subset}"][i] = int(mask.sum())
         for m in models:
             correct = torch.from_numpy(np.array(predictions.preds[m][i])).long() == lab
-            out[f"acc_{m}"][i] = correct[valid].float().mean().item()
-            out[f"edge_acc_{m}"][i] = correct[near_edge].float().mean().item()
+            for subset, mask in subsets.items():
+                out[f"{subset}_{m}"][i] = correct[mask].float().mean().item()
     return out
 
 

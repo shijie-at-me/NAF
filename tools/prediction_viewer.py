@@ -3,8 +3,8 @@
     streamlit run tools/prediction_viewer.py [-- --predictions output/predictions]
 
 Lists the prediction caches under ``--predictions`` and, for the chosen one, every val image with each model's
-accuracy (all labeled pixels, or those within 4 px of a boundary), sorted by a model or by the difference between two
-models. The images of a page are drawn with the ground truth and each model's prediction or errors; window oracles
+accuracy over a pixel subset (all labeled pixels, near edges, thin structures, minority pixels or small regions, as the
+error breakdown groups them), sorted by a model or by the difference between two models. The images of a page are drawn with the ground truth and each model's prediction or errors; window oracles
 (``oracle_<k>x<k>``, as the error breakdown defines them) can be drawn too, computed from the cached bilinear
 predictions. A cache made with probes that changed since is flagged.
 
@@ -31,7 +31,8 @@ if ROOT not in sys.path:
 VOID = 255
 ORACLES = ("oracle_1x1", "oracle_3x3", "oracle_5x5", "oracle_9x9")
 ORACLE_NAME = re.compile(r"oracle_(?P<k>\d+)x(?P=k)")
-METRICS = {"acc": "Accuracy, all labeled pixels", "edge_acc": "Accuracy near edges (< 4 px)"}
+# Short tag of each pixel subset (src.analysis.predictions.PIXEL_SUBSETS) in the image captions
+SUBSET_TAGS = {"acc": "", "edge_acc": "edge", "thin_acc": "thin", "minority_acc": "minority", "small_acc": "small"}
 
 
 def parse_args():
@@ -72,10 +73,25 @@ def load_predictions(cache_dir):
     return load(cache_dir)
 
 
-@st.cache_data(persist="disk", show_spinner="Computing the per-image accuracies (once per cache)...")
-def per_image_table(cache_dir, meta_mtime):
-    """``acc_<model>`` / ``edge_acc_<model>`` of every cached image (``src.analysis.predictions.per_image_accuracy``),
-    indexed by the val image index; ``meta_mtime`` invalidates it when the cache is regenerated."""
+@st.cache_resource
+def accuracy_code_version():
+    """Hash of the code ``per_image_table`` runs: its disk cache is keyed by its own source only, so a change of the
+    accuracies' definition must change one of its arguments."""
+    import hashlib
+    import inspect
+
+    from src.analysis import pixels, predictions
+
+    sources = [inspect.getsource(predictions.per_image_accuracy), inspect.getsource(predictions.pixel_subsets)]
+    sources += [inspect.getsource(pixels), repr(predictions.PIXEL_SUBSETS), repr(predictions.EDGE_DISTANCE)]
+    return hashlib.sha1("".join(sources).encode()).hexdigest()
+
+
+@st.cache_data(persist="disk", show_spinner="Computing the per-image accuracies (once per cache and code version)...")
+def per_image_table(cache_dir, meta_mtime, code_version):
+    """``<subset>_<model>`` accuracies and ``n_<subset>`` pixel counts of every cached image
+    (``src.analysis.predictions.per_image_accuracy``), indexed by the val image index; ``meta_mtime`` invalidates it
+    when the cache is regenerated, ``code_version`` (``accuracy_code_version``) when the accuracies' code changes."""
     from src.analysis.predictions import per_image_accuracy
 
     table = pd.DataFrame(per_image_accuracy(load_predictions(cache_dir)))
@@ -224,22 +240,24 @@ def error_overlay(image, label, pred):
     return (0.4 * image + 0.6 * wrong).astype(np.uint8)
 
 
+@st.cache_resource
+def metrics():
+    """Metric name -> description: the accuracy over each pixel subset of ``per_image_accuracy``."""
+    from src.analysis.predictions import PIXEL_SUBSETS
+
+    return {name: f"Accuracy, {pixels}" for name, pixels in PIXEL_SUBSETS.items()}
+
+
 @st.cache_data(max_entries=512)
 def scored_pixels(cache_dir, index, metric):
-    """The pixels ``metric`` scores in image ``index``: the labeled ones (``acc``), or those of them near an edge
-    (``edge_acc``, as ``src.analysis.predictions.per_image_accuracy`` defines it)."""
-    _, labels, _ = open_cache(cache_dir)
-    label = np.asarray(labels[index])
-    valid = label != VOID
-    if metric == "acc":
-        return valid
+    """The pixels ``metric`` scores in image ``index`` (``src.analysis.predictions.pixel_subsets``): [S, S] bool."""
     import torch
 
-    from src.analysis.pixels import boundary_distance
-    from src.analysis.predictions import EDGE_DISTANCE
+    from src.analysis.predictions import pixel_subsets
 
-    distance = boundary_distance(torch.from_numpy(np.array(label))[None])[0].numpy()
-    return valid & (distance < EDGE_DISTANCE)
+    meta, labels, _ = open_cache(cache_dir)
+    label = torch.from_numpy(np.array(labels[index]))
+    return pixel_subsets(label, meta["num_classes"], tuple(meta["lr_size"]))[metric].numpy()
 
 
 def accuracy(label, pred, pixels):
@@ -248,9 +266,10 @@ def accuracy(label, pred, pixels):
 
 
 def score_caption(model, value, metric):
-    """``naf (57.4)``, ``naf (edge 41.3)``, or a dash when the image has no such pixels."""
+    """``naf (57.4)``, ``naf (thin 41.3)``, or a dash when the image has no such pixels."""
     score = "–" if np.isnan(value) else f"{value * 100:.1f}"
-    return f"{model} ({'edge ' if metric == 'edge_acc' else ''}{score})"
+    tag = SUBSET_TAGS.get(metric, metric)
+    return f"{model} ({tag + ' ' if tag else ''}{score})"
 
 
 def swatch(color, text):
@@ -288,7 +307,7 @@ def class_legend(label, preds, class_names):
 
 def draw_image(cache_dir, index, models, errors, width, metric="acc", show_legend=False):
     """One row: the image index (and the class legend) above the image, ground truth, then every model's prediction
-    (or errors) with its accuracy under ``metric`` (``METRICS``)."""
+    (or errors) with its accuracy under ``metric`` (``metrics()``)."""
     meta, labels, preds = open_cache(cache_dir)
     cfg_json = json.dumps(meta["dataset_cfg"], sort_keys=True)
     image = load_image(cfg_json, meta["size"], int(index))
@@ -321,11 +340,15 @@ def images_page(cache_dir, meta, per_image):
     models = list(meta["models"])
     drawable = models + (list(ORACLES) if has_oracles(cache_dir, meta) else [])
 
-    c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-    metric = c1.selectbox("Metric", list(METRICS), format_func=METRICS.get)
+    names = metrics()
+    c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 1])
+    metric = c1.selectbox("Metric", list(names), format_func=names.get)
     sort_by = c2.selectbox("Sort by", models, index=models.index("naf") if "naf" in models else 0)
     versus = c3.selectbox("minus (optional)", ["—", *[m for m in models if m != sort_by]])
-    worst_first = c4.toggle("Worst first", value=True)
+    min_pixels = c4.number_input(
+        "Min pixels", min_value=0, value=0, step=50, help="Only images with at least this many scored pixels"
+    )
+    worst_first = c5.toggle("Worst first", value=True)
     shown = st.multiselect(
         "Models", drawable, default=models, key="shown_models", help="Window oracles are drawn, not sorted by"
     )
@@ -336,8 +359,12 @@ def images_page(cache_dir, meta, per_image):
     if versus != "—":
         key = key - per_image[f"{metric}_{versus}"] * 100
         key_name = f"sort: {sort_by} − {versus}"
-    table = pd.DataFrame({key_name: key} | {m: per_image[f"{metric}_{m}"] * 100 for m in shown if m in models})
-    table = table.loc[key.sort_values(ascending=worst_first, na_position="last").index].reset_index()
+    table = pd.DataFrame(
+        {key_name: key, "pixels": per_image[f"n_{metric}"]}
+        | {m: per_image[f"{metric}_{m}"] * 100 for m in shown if m in models}
+    )
+    table = table.loc[key.sort_values(ascending=worst_first, na_position="last").index]
+    table = table[table["pixels"] >= max(min_pixels, 1)].reset_index()
 
     st.caption(
         f"{len(table)} images, sorted by {key_name.removeprefix('sort: ')} ({'lowest' if worst_first else 'highest'} first)"
@@ -403,7 +430,7 @@ def main():
     meta = caches[cache_dir]
     st.header(f"{meta['task']} · {meta['dataset']} val · {meta['backbone']}")
     st.caption(f"{meta['num_images']} images at {meta['size']} px, models: {', '.join(meta['models'])}")
-    images_page(cache_dir, meta, per_image_table(cache_dir, meta_mtime))
+    images_page(cache_dir, meta, per_image_table(cache_dir, meta_mtime, accuracy_code_version()))
 
 
 if __name__ == "__main__":
