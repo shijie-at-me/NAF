@@ -1,4 +1,4 @@
-_target_: evaluation.dataset.voc.HFVOCDataset
+_target_: src.dataset.voc.HFVOCDataset
 tag: "voc"
 # Hub repo id or URL with image / mask columns
 repo: shijli/voc2012

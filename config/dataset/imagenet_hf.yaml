@@ -1,4 +1,4 @@
-_target_: evaluation.dataset.image_dataset.HFImageDataset
+_target_: src.dataset.imagenet.HFImageDataset
 # Hub repo id or URL; gated, so run `huggingface-cli login` and accept the terms on the Hub page first
 repo: ILSVRC/imagenet-1k
 split: train

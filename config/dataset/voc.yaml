@@ -1,4 +1,4 @@
-_target_: evaluation.dataset.voc.VOCDataset
+_target_: src.dataset.voc.VOCDataset
 tag: "voc"
 root: ${dataroot}
 split: "train"

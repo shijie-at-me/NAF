@@ -10,11 +10,10 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets import folder
 
-HF_DATASET_URL = "https://huggingface.co/datasets/"
-DEFAULT_HF_REPO = "ILSVRC/imagenet-1k"
+from .common import relative_posix, resolve_local_split
+from .hub import load_hub_split
 
-# Split names that the training code asks for but some datasets name differently.
-SPLIT_ALIASES = {"val": ("validation", "valid"), "validation": ("val", "valid")}
+DEFAULT_HF_REPO = "ILSVRC/imagenet-1k"
 
 
 # --- local folder ---------------------------------------------------------------------------------------------------
@@ -40,39 +39,9 @@ def list_samples(root: str, class_to_idx: dict, extensions, is_valid_file, cache
 
     print(f"Walking directory: {root}")
     samples = folder.make_dataset(root, class_to_idx, extensions, is_valid_file)
-    # "/" separators so a list written on Windows also works on Linux (and vice versa)
-    samples = [(os.path.relpath(path, root).replace(os.sep, "/"), idx) for path, idx in samples]
+    samples = [(relative_posix(path, root), idx) for path, idx in samples]
     write_sample_list(cache_path, samples)
     return samples
-
-
-def resolve_local_split(root: str, split: str) -> str:
-    """``root/split``, or ``root/<alias>`` if only an alias exists (``val`` -> ``validation`` / ``valid``)."""
-    for candidate in (split, *SPLIT_ALIASES.get(split, ())):
-        path = os.path.join(root, candidate)
-        if os.path.isdir(path):
-            return path
-    available = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
-    raise ValueError(f"Split '{split}' not found in {root}, available: {available}")
-
-
-# --- Hugging Face Hub -----------------------------------------------------------------------------------------------
-
-
-def to_repo_id(repo: str) -> str:
-    """Accept a Hub repo id (``ILSVRC/imagenet-1k``) or its URL (``https://huggingface.co/datasets/ILSVRC/imagenet-1k``)."""
-    return repo.removeprefix(HF_DATASET_URL).split("/tree/")[0].strip("/")
-
-
-def resolve_split(repo_id: str, split: str, name: str | None = None) -> str:
-    """Return ``split`` if the dataset has it, else the first alias it has (``val`` -> ``validation`` / ``valid``)."""
-    from datasets import get_dataset_split_names
-
-    available = get_dataset_split_names(repo_id, name)
-    for candidate in (split, *SPLIT_ALIASES.get(split, ())):
-        if candidate in available:
-            return candidate
-    raise ValueError(f"Split '{split}' not found in {repo_id}, available: {available}")
 
 
 # --- datasets -------------------------------------------------------------------------------------------------------
@@ -167,12 +136,8 @@ class HFImageDataset(BaseImageDataset):
         num_proc: int | None = None,
         **kwargs,
     ):
-        from datasets import load_dataset
-
         super().__init__(**kwargs)
-        self.repo_id = to_repo_id(repo)
-        self.split = resolve_split(self.repo_id, split, name)
-        self.data = load_dataset(self.repo_id, name, split=self.split, cache_dir=cache_dir, num_proc=num_proc)
+        self.repo_id, self.split, self.data = load_hub_split(repo, split, name, cache_dir, num_proc)
         self.image_key = image_key
         self.label_key = label_key
 
