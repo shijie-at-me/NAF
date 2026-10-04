@@ -70,6 +70,7 @@ class SemanticEncoder(nn.Module):
             from safetensors.torch import load_file
 
             state_dict = remap_convnext_hf_to_timm(load_file(str(Path(hf_dir) / "model.safetensors")))
+
         missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
         missing = [k for k in missing if not k.startswith("head.")]
         if missing or unexpected:
