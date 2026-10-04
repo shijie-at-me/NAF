@@ -1,0 +1,13 @@
+_target_: src.dataset.ade20k.HFADE20KDataset
+tag: "ade20k"
+# Hub repo id or URL with id / image / mask columns
+repo: shijli/ade20k
+# segmentation: 20210 train / 2000 val
+name: segmentation
+split: "train"
+skip_other_class: false
+file_set: null
+# null uses $HF_HOME/datasets
+cache_dir: null
+num_proc: null
+num_classes: 151
