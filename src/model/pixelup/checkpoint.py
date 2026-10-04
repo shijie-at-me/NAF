@@ -5,8 +5,9 @@ Port of https://github.com/deepankkumar/PixelUp (MIT License, v0.1.0). The model
 
 import os
 
-from src.backbone.convnext import DEFAULT_SEMANTIC_ENCODER, SemanticEncoder
 from src.utils.checkpoint import load_checkpoint as load_checkpoint_file
+
+from .semantic_encoder import DEFAULT_SEMANTIC_ENCODER, SemanticEncoder
 
 RELEASE_URL = "https://github.com/deepankkumar/PixelUp/releases/download/v0.1.0/{}.pth"
 

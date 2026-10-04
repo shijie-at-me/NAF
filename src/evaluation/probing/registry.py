@@ -10,9 +10,8 @@ from urllib.parse import urlparse
 import torch
 from omegaconf import OmegaConf
 
-from src.utils.checkpoint import load_checkpoint
-from src.utils.config import launch_path
-from src.utils.paths import WEIGHTS_DIR
+from src.utils.checkpoint import WEIGHTS_DIR, load_checkpoint
+from src.utils.run import launch_path
 
 __all__ = [
     "PROBES_DIR",

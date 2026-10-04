@@ -3,7 +3,7 @@
 import torch
 import torch.nn.functional as F
 
-from src.dataset.common import IGNORE_LABEL
+from src.dataset.sources import IGNORE_LABEL
 from src.losses import DepthLoss
 from src.utils.metrics import DEPTH_METRICS, confusion_matrix, depth_metrics, segmentation_scores
 

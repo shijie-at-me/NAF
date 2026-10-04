@@ -3,7 +3,29 @@
 import torch
 import torch.nn.functional as F
 
-from .tensors import to_floats
+__all__ = [
+    "DEPTH_METRICS",
+    "class_iou",
+    "confusion_matrix",
+    "depth_metrics",
+    "gaussian_window",
+    "psnr",
+    "segmentation_scores",
+    "ssim",
+    "ssim_map",
+    "ssim_terms",
+    "to_floats",
+]
+
+
+def to_floats(values):
+    """``{name: 0-dim tensor}`` -> ``{name: float}`` with a single device-to-host copy (one sync, not one per value).
+
+    Gathered in float64, which holds bf16, float32 and float64 values exactly.
+    """
+    if not values:
+        return {}
+    return dict(zip(values, torch.stack([v.detach().double() for v in values.values()]).tolist(), strict=True))
 
 
 def psnr(pred, target, max_val=1.0):

@@ -5,7 +5,7 @@ import os
 import torch
 from torch import nn
 
-from src.utils.paths import FINETUNED_CKPT_DIR
+from src.utils.checkpoint import FINETUNED_CKPT_DIR
 
 from .families import FAMILIES, create_backbone_model
 from .registry import get_backbone_family, infer_patch_size, split_finetune_tag, supports_prefix_tokens

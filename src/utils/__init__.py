@@ -1,17 +1,14 @@
 """Project-wide helpers that belong to no single package.
 
-- ``paths``: where weights and fine-tuned backbones live (overridable by environment variables)
-- ``config``: ``~`` expansion in configs, paths relative to the launch directory
-- ``checkpoint``: checkpoint files (path or URL), and models built from a config with one
-- ``img``: image normalization (ImageNet / backbone statistics), resizing, coordinate grids
-- ``upsampling``: the shared feature pipeline, frozen backbone features then an upsampler
+- ``run``: running an entry point: config paths (``~``, launch directory), the console mirrored to a log file, the
+  run header, the output dir, TensorBoard and the device (``start_run``)
+- ``checkpoint``: where weights live (overridable by environment variables), checkpoint files (path or URL), and
+  models built from a config with one (``build_model``, ``load_upsampler``)
+- ``image``: image normalization (ImageNet / backbone statistics), resizing, coordinate grids
+- ``metrics``: PSNR / SSIM, depth metrics, confusion matrix, accuracy and IoU, losses to floats
 - ``training``: bf16 autocast, gradient checkpointing, seeding, parameter counts
-- ``log``: console mirrored to a log file, run header, losses to TensorBoard
-- ``run``: run setup for the entry points (output dir, console, TensorBoard writer, device)
-- ``metrics``: PSNR / SSIM, depth metrics, confusion matrix, accuracy and IoU
-- ``tensors``: dicts of 0-dim tensors to floats in one host copy
-- ``pca``, ``visualization``: feature maps as RGB images, figures, the PASCAL palette
+- ``visualization``: feature maps as RGB images (PCA), figures, the PASCAL palette
 
-Elsewhere: building datasets and loaders, transforms and synthetic noise are in ``src.dataset`` (``loading``,
-``transforms``, ``noise``); the probe registry is ``src.evaluation.probing.registry``.
+Elsewhere: datasets, loaders, transforms and synthetic noise are in ``src.dataset``; the backbone -> upsampler feature
+pipeline is ``src.backbone.features``; the probe registry is ``src.evaluation.probing.registry``.
 """

@@ -4,10 +4,11 @@
 - ``families``: per family (timm, RADIO, Franca, CAPI), how to build the model and read its patch features
 - ``wrapper``: ``PretrainedViTWrapper``, the backbone module the rest of the code uses, and fine-tuned weights
 - ``loading``: frozen backbones from configs
-- ``convnext``: PixelUp's Semantic Encoder (a frozen DINOv3 ConvNeXt pyramid)
+- ``features``: the feature pipeline, frozen backbone features then an upsampler (``upsample_features``)
 """
 
 from .families import create_backbone_model
+from .features import backbone_features, upsample_features
 from .loading import load_backbone, load_multiple_backbones
 from .registry import MODEL_LIST, feature_dim, get_backbone_family, infer_patch_size, split_finetune_tag
 from .wrapper import PretrainedViTWrapper
@@ -15,6 +16,7 @@ from .wrapper import PretrainedViTWrapper
 __all__ = [
     "MODEL_LIST",
     "PretrainedViTWrapper",
+    "backbone_features",
     "create_backbone_model",
     "feature_dim",
     "get_backbone_family",
@@ -22,4 +24,5 @@ __all__ = [
     "load_backbone",
     "load_multiple_backbones",
     "split_finetune_tag",
+    "upsample_features",
 ]

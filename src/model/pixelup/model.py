@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from src.layers import CastRMSNorm, SpiralRoPE2D, build_up_module
 from src.model.base import BaseUpsampler
-from src.utils.img import IMAGENET_MEAN, IMAGENET_STD
+from src.utils.image import IMAGENET_MEAN, IMAGENET_STD
 
 from .blocks import CrossAttentionStage, NeighborhoodCrossAttention, PixelEncoder, add_
 from .checkpoint import build_semantic_encoder, load_checkpoint, resolve_arch, split_checkpoint

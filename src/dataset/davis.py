@@ -13,9 +13,8 @@ import os
 
 from PIL import Image
 
-from .common import check_split_size, read_lines
-from .hub import load_hub_split
 from .segmentation import SegmentationDataset
+from .sources import check_split_size, load_hub_split, read_lines
 
 DEFAULT_HF_REPO = "shijli/davis2017"
 

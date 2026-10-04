@@ -1,6 +1,18 @@
+"""Image tensors: normalization (ImageNet or backbone statistics), resizing, coordinate grids."""
+
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+
+__all__ = [
+    "IMAGENET_MEAN",
+    "IMAGENET_STD",
+    "bilinear_resize",
+    "create_coordinate",
+    "normalize",
+    "normalize_pair",
+    "round_to_nearest_multiple",
+]
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)

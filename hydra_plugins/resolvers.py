@@ -22,6 +22,6 @@ def get_patch_size(target: str) -> int:
 
 
 # Hydra imports every module of this package at startup, even one a script already imported itself (e.g.
-# analysis/failure_analysis.py): re-registering must replace, not raise
+# src/analysis/shared.py): re-registering must replace, not raise
 OmegaConf.register_new_resolver("get_feature", get_feature, replace=True)
 OmegaConf.register_new_resolver("get_patch_size", get_patch_size, replace=True)

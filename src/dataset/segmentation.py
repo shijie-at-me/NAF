@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from .common import IGNORE_LABEL
+from .sources import IGNORE_LABEL
 
 
 def train_id_lut(mapping: dict[int, int]) -> torch.Tensor:

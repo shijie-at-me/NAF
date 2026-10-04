@@ -14,8 +14,8 @@ from src.backbone import load_multiple_backbones
 from src.dataset.loading import get_dataloaders
 from src.dataset.transforms import get_batch
 from src.utils.checkpoint import build_model, save_checkpoint
-from src.utils.img import bilinear_resize, normalize_pair, round_to_nearest_multiple
-from src.utils.log import log_losses
+from src.utils.image import bilinear_resize, normalize_pair, round_to_nearest_multiple
+from src.utils.run import log_losses
 from src.utils.training import autocast, count_parameters, setup_training_optimizations
 
 from .loop import is_checkpoint_step, step_budget, training_batches

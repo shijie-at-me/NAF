@@ -7,7 +7,7 @@ from torch import nn
 
 from src.layers import CrossAttention, RoPE, encoder
 from src.model.base import BaseUpsampler
-from src.utils.img import bilinear_resize
+from src.utils.image import bilinear_resize
 
 __all__ = ["NAF"]
 

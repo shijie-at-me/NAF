@@ -1,5 +1,5 @@
-"""Checkpoint files: given as a path or a URL (downloaded once to ``WEIGHTS_DIR``), loaded, saved, and models built
-from their config with one."""
+"""Weights: where they live, checkpoint files given as a path or a URL (downloaded once to ``WEIGHTS_DIR``), loaded and
+saved, and models built from their config with one."""
 
 import os
 from urllib.parse import urlparse
@@ -7,9 +7,24 @@ from urllib.parse import urlparse
 import torch
 from hydra.utils import instantiate
 
-from src.utils.paths import WEIGHTS_DIR
+__all__ = [
+    "ROOT",
+    "WEIGHTS_DIR",
+    "FINETUNED_CKPT_DIR",
+    "load_upsampler",
+    "build_model",
+    "load_checkpoint",
+    "resolve_checkpoint",
+    "save_checkpoint",
+]
 
-__all__ = ["build_model", "load_checkpoint", "resolve_checkpoint", "save_checkpoint"]
+
+# Repository root (this file is <root>/src/utils/checkpoint.py)
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Downloaded and trained checkpoints: <root>/weights (git-ignored), or $NAF_WEIGHTS_DIR
+WEIGHTS_DIR = os.environ.get("NAF_WEIGHTS_DIR", os.path.join(ROOT, "weights"))
+# The dvt_ / fit3d_ fine-tuned backbones, as <tag>_<model name>.pth: <WEIGHTS_DIR>/finetuned, or $NAF_FINETUNED_CKPT_DIR
+FINETUNED_CKPT_DIR = os.environ.get("NAF_FINETUNED_CKPT_DIR", os.path.join(WEIGHTS_DIR, "finetuned"))
 
 
 def resolve_checkpoint(ckpt_path):
@@ -46,3 +61,15 @@ def save_checkpoint(model, ckpt_dir, step):
     path = os.path.join(ckpt_dir, f"model_{step}steps.pth")
     torch.save(model.state_dict(), path)
     return path
+
+
+def load_upsampler(model_cfg, ckpt_path, device, console=None, trainable=False):
+    """The upsampler of ``model_cfg`` with the weights of ``ckpt_path`` (path or URL; None: as built), in eval mode and
+    frozen unless ``trainable``; says on ``console`` (if given) which weights it has."""
+    model = build_model(model_cfg, device, ckpt_path, weights_only=False)
+    if console is not None:
+        if ckpt_path:
+            console.print(f"[green]Loaded model from checkpoint: {ckpt_path}[/green]")
+        else:
+            console.print("[yellow]No model checkpoint provided, using the model as built[/yellow]")
+    return model.requires_grad_(trainable).eval()

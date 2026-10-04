@@ -7,7 +7,7 @@ attention weights. NATTEN's fused kernels are faster: this is the fallback.
 
 Queries are processed a chunk of rows at a time, so the gathered key/value windows of only one chunk exist at
 once; with autograd, each chunk is recomputed in the backward pass instead of keeping its windows alive. The
-windows themselves come from ``src.layers.windows``.
+windows themselves come from ``windows``.
 """
 
 import torch

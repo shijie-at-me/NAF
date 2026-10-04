@@ -1,5 +1,5 @@
 """NATTEN neighborhood attention, when it can run: version detection, the pre-0.20 API, and a memory of the inputs
-NATTEN failed on (they go straight to the PyTorch fallback, ``src.layers.neighborhood``, afterwards)."""
+NATTEN failed on (they go straight to the PyTorch fallback, ``fallback``, afterwards)."""
 
 import warnings
 

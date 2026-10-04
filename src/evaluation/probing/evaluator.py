@@ -8,9 +8,9 @@ import torch.nn.functional as F
 from hydra.utils import instantiate
 from tqdm import tqdm
 
+from src.backbone.features import upsample_features
 from src.dataset.transforms import get_batch
 from src.utils.training import autocast
-from src.utils.upsampling import upsample_features
 
 __all__ = ["ProbeEvaluator"]
 

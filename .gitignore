@@ -31,7 +31,6 @@ Thumbs.db
 data/
 weights/
 output/
-outputs/
 multirun/
 wandb/
 lightning_logs/

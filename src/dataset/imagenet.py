@@ -10,8 +10,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets import folder
 
-from .common import relative_posix, resolve_local_split
-from .hub import load_hub_split
+from .sources import load_hub_split, relative_posix, resolve_local_split
 
 DEFAULT_HF_REPO = "ILSVRC/imagenet-1k"
 

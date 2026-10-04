@@ -4,9 +4,8 @@ Labels are class ids 0-20 with 255 on object boundaries (ignored). ``datasets`` 
 ``torchvision``'s VOC reader only by the local one.
 """
 
-from .common import check_split_size
-from .hub import load_hub_split
 from .segmentation import SegmentationDataset
+from .sources import check_split_size, load_hub_split
 
 DEFAULT_HF_REPO = "shijli/voc2012"
 

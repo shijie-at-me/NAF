@@ -8,7 +8,7 @@ from hydra.utils import instantiate
 
 from .transforms import build_transforms
 
-__all__ = ["build_dataloader", "build_dataset", "get_dataloaders", "seed_worker"]
+__all__ = ["build_dataloader", "build_dataset", "get_dataloaders", "seed_worker", "split_loader"]
 
 # Old dataset modules -> their current ones (most specific first); configs saved with older probes still name them
 LEGACY_DATASET_MODULES = {
@@ -72,3 +72,9 @@ def get_dataloaders(cfg, shuffle=True, val=True):
         return train_loader, None
     val_loader = build_dataloader(cfg.val_dataloader, build_dataset(cfg.dataset, transforms, split="val"), shuffle)
     return train_loader, val_loader
+
+
+def split_loader(dataset_cfg, split, loader_cfg, size):
+    """Loader of a split of a dataset in a fixed order; images and labels resized and center-cropped to ``size``."""
+    dataset = build_dataset(dataset_cfg, build_transforms(size, size), split=split)
+    return build_dataloader(loader_cfg, dataset, shuffle=False)
