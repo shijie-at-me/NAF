@@ -1,8 +1,12 @@
-"""Upsampler models.
+"""Upsampler models, all with the ``BaseUpsampler`` interface ``forward(image, features, output_size)``.
 
-Every submodule in this package is imported automatically, and the names listed in
-its ``__all__`` are re-exported here (e.g. ``src.model.NAF``). To add a model, create
-a new file that defines ``__all__``; this file does not need to change.
+- ``interpolation`` (Bilinear, Nearest), ``naf``, ``jafar``, ``featup``, ``anyup``: feature upsamplers;
+- ``pixelup``: PixelUp, a package of its blocks, checkpoint handling and model;
+- ``denoisers``: image restoration baselines for the denoising experiments (IRCNN, REDNet, Restormer, JBF, JBU).
+
+Every submodule and subpackage of this package is imported automatically, and the names listed in its ``__all__``
+are re-exported here (e.g. ``src.model.NAF``). To add a model, create a new file (or package) that defines
+``__all__``; this file does not need to change.
 
 Use ``get_model(name, **kwargs)`` to build a model from its name.
 """

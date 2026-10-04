@@ -1,6 +1,6 @@
 """PixelUp checkpoints: release assets, the architecture they record, and their Semantic Encoder weights.
 
-Port of https://github.com/deepankkumar/PixelUp (MIT License, v0.1.0). The model is in ``src/model/pixelup.py``.
+Port of https://github.com/deepankkumar/PixelUp (MIT License, v0.1.0). The model is in ``src.model.pixelup.model``.
 """
 
 import os
@@ -8,7 +8,7 @@ import os
 import torch
 
 from src.backbone.convnext import DEFAULT_SEMANTIC_ENCODER, SemanticEncoder
-from utils.checkpoint import resolve_checkpoint
+from src.utils.checkpoint import resolve_checkpoint
 
 RELEASE_URL = "https://github.com/deepankkumar/PixelUp/releases/download/v0.1.0/{}.pth"
 

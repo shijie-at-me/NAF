@@ -1,8 +1,13 @@
+"""NAF: an image encoder gives queries (at the output size) and keys (pooled to the features), the low-res
+features are the values of a windowed cross-attention."""
+
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from src.layers import CrossAttention, RoPE, encoder
+from src.model.base import BaseUpsampler
+from src.utils.img import bilinear_resize
 
 __all__ = ["NAF"]
 
@@ -57,13 +62,13 @@ class ImageEncoder(nn.Module):
     def forward(self, x, output_size):
         size = guide_size(x.shape[-2:], output_size)
         if size is not None:
-            x = F.interpolate(x, size=size, mode="bilinear", align_corners=False)
+            x = bilinear_resize(x, size)
 
         x = self.forward_encoder(x, output_size)
         return self.rope(x)
 
 
-class NAF(nn.Module):
+class NAF(BaseUpsampler):
     def __init__(
         self,
         dim=256,
