@@ -6,40 +6,17 @@ runs where NATTEN has no kernel (CPU, NATTEN builds without libnatten, unsupport
 attention weights. NATTEN's fused kernels are faster: this is the fallback.
 
 Queries are processed a chunk of rows at a time, so the gathered key/value windows of only one chunk exist at
-once; with autograd, each chunk is recomputed in the backward pass instead of keeping its windows alive.
+once; with autograd, each chunk is recomputed in the backward pass instead of keeping its windows alive. The
+windows themselves come from ``src.layers.windows``.
 """
 
 import torch
-import torch.nn.functional as F
-from torch import Tensor
 from torch.utils.checkpoint import checkpoint
+
+from .windows import low_res_windows
 
 # Max elements of the gathered key (or value) windows, or of the attention weights, of one chunk of query rows
 MAX_CHUNK_ELEMENTS = 2**26
-
-
-def natten_window(length: int, kernel_size: int, dilation: int, device=None) -> Tensor:
-    """Indices of the ``kernel_size`` neighbors of every position along one axis: [length, kernel_size].
-
-    Same neighborhoods as NATTEN: positions are split into ``dilation`` interleaved groups and, within its group,
-    each position takes the window centered on it, shifted inwards at the borders.
-    """
-    idx = torch.arange(length, device=device)
-    group, pos = idx % dilation, idx // dilation
-    group_len = (length - group + dilation - 1) // dilation
-    start = torch.minimum((pos - kernel_size // 2).clamp(min=0), group_len - kernel_size)
-    return group[:, None] + (start[:, None] + torch.arange(kernel_size, device=device)) * dilation
-
-
-def low_res_windows(out_len: int, in_len: int, kernel_size: int, dilation: int, device=None) -> Tensor:
-    """Low-res index of every neighbor of every query along one axis: [out_len, kernel_size].
-
-    The neighbors live on the nearest-exact upsampled grid; the source index of each upsampled position is read off
-    ``F.interpolate`` itself, so the mapping matches the upsampling bit for bit.
-    """
-    src = torch.arange(in_len, device=device, dtype=torch.float32).view(1, 1, -1)
-    src = F.interpolate(src, size=out_len, mode="nearest-exact").view(-1).long()
-    return src[natten_window(out_len, kernel_size, dilation, device)]
 
 
 def _attend_rows(q, k, v, win_h, win_w, rows_per_window):

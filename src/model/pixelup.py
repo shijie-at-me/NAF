@@ -28,10 +28,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from src.layers.attentions import CrossAttention, low_res_heads
-from src.layers.neighborhood import upsampled_neighborhood_attention
-from src.layers.spiral_rope import SpiralRoPE2D
-from src.layers.upsample import build_up_module
+from src.layers import (
+    CastRMSNorm,
+    CrossAttention,
+    SpiralRoPE2D,
+    build_up_module,
+    low_res_heads,
+    upsampled_neighborhood_attention,
+    upsampling_dilation,
+)
 from src.model.base import BaseUpsampler
 from src.model.pixelup_checkpoint import build_semantic_encoder, load_checkpoint, resolve_arch, split_checkpoint
 
@@ -94,11 +99,6 @@ class PixelEncoder(nn.Module):
         return self.r4(self.r3(x))
 
 
-class _RMSNorm(nn.RMSNorm):
-    def forward(self, x):
-        return super().forward(x.to(self.weight.dtype)).to(x.dtype)
-
-
 class CrossAttentionStage(nn.Module):
     """Pre-norm cross-attention (queries -> Semantic Encoder stage features) + FFN, both residual."""
 
@@ -108,11 +108,11 @@ class CrossAttentionStage(nn.Module):
         self.num_heads, self.head_dim = num_heads, d // num_heads
         self.scale = self.head_dim**-0.5
         self.kernel_size = kernel_size
-        self.norm_q, self.norm_kv = _RMSNorm(d), _RMSNorm(c_kv)
+        self.norm_q, self.norm_kv = CastRMSNorm(d), CastRMSNorm(c_kv)
         self.q_proj = nn.Linear(d, d, bias=False)
         self.k_proj = nn.Linear(c_kv, d, bias=False)
         self.v_proj = nn.Linear(c_kv, d, bias=False)
-        self.norm_ffn = _RMSNorm(d)
+        self.norm_ffn = CastRMSNorm(d)
         self.ffn = nn.Sequential(
             nn.Linear(d, d * mlp_ratio, bias=False), nn.GELU(), nn.Linear(d * mlp_ratio, d, bias=False)
         )
@@ -158,7 +158,7 @@ class NeighborhoodCrossAttention(nn.Module):
         self.value_dim = value_dim  # informative: the weights apply to whatever values are given
         self.q_proj = nn.Linear(d_enc, d_enc, bias=False)
         self.k_proj = nn.Linear(d_enc, d_enc, bias=False)
-        self.norm_q, self.norm_k = _RMSNorm(d_enc), _RMSNorm(d_enc)
+        self.norm_q, self.norm_k = CastRMSNorm(d_enc), CastRMSNorm(d_enc)
         self.max_dilation: int | None = None
         # The original always attends in bf16
         self.compute_dtype = torch.bfloat16
@@ -186,15 +186,12 @@ class NeighborhoodCrossAttention(nn.Module):
         """
         ho, wo = q.shape[1:3]
         hk, wk = v_2d.shape[-2:]
-        dy, dx = max(1, ho // hk), max(1, wo // wk)
-        if self.max_dilation is not None:
-            dy, dx = min(dy, self.max_dilation), min(dx, self.max_dilation)
         out, _ = upsampled_neighborhood_attention(
             q,
             k,
             low_res_heads(v_2d, 1, self.compute_dtype),  # one head: the head-averaged weights apply to every channel
             (self.kernel_size, self.kernel_size),
-            (dy, dx),
+            upsampling_dilation((ho, wo), (hk, wk), self.max_dilation),
             1.0,
             need_weights=False,
             out_dtype=out_dtype,
@@ -262,7 +259,7 @@ class PixelUp(BaseUpsampler):
             setattr(self, f"cross_{tag}", cross)
 
         self.q_rope = SpiralRoPE2D(d_enc, int(a["rope_directions"])) if self.chain_q_rope else None
-        self.q_norm = _RMSNorm(d_enc) if bool(a["q_norm_stages"]) else None
+        self.q_norm = CastRMSNorm(d_enc) if bool(a["q_norm_stages"]) else None
 
         if bool(a["use_smooth"]):
             # 1x1 conv initialized to the identity
