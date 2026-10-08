@@ -2,7 +2,8 @@
 ``<WEIGHTS_DIR>/<model>/probes/<task>_<dataset>_<backbone>[@<checkpoint>].pth``, e.g.
 ``weights/pixelup/probes/seg_voc_dinov3-b16@convnext_s.pth``:
 
-- ``backbone`` is the backbone's short name (``src.backbone.registry.short_name``: ``dinov3-b16``);
+- ``backbone`` is the backbone's short name (``src.backbone.registry.short_name``: ``dinov3-b16``), followed by
+  ``-l<layer>`` for the features of an intermediate block (``backbone.layer``: ``dinov3-b16-l6``);
 - ``checkpoint`` is the upsampler's weights file stem without the ``<model>_`` prefix (``pixelup_convnext_s`` ->
   ``convnext_s``), absent for upsamplers without weights (bilinear, nearest).
 
@@ -56,18 +57,21 @@ def split_upsampler(upsampler):
     return model, checkpoint.removeprefix(f"{model}_")
 
 
-def probe_name(task, dataset, backbone, checkpoint=""):
-    """File stem of a probe: ``<task>_<dataset>_<backbone short name>[@<checkpoint tag>]``."""
+def probe_name(task, dataset, backbone, checkpoint="", layer=None):
+    """File stem of a probe: ``<task>_<dataset>_<backbone short name>[-l<layer>][@<checkpoint tag>]``."""
     stem = f"{task}_{dataset}_{short_name(backbone)}"
+    if layer is not None:
+        stem = f"{stem}-l{layer}"
     return f"{stem}@{checkpoint}" if checkpoint else stem
 
 
-def probe_path(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
-    """Where the probe of ``upsampler`` (``<model>[@<checkpoint>]``) on ``backbone`` features is saved for ``task`` on
-    ``dataset``: ``<root>/<model>/probes/<task>_<dataset>_<backbone>[@<checkpoint>].pth``."""
+def probe_path(task, dataset, backbone, upsampler, root=WEIGHTS_DIR, layer=None):
+    """Where the probe of ``upsampler`` (``<model>[@<checkpoint>]``) on ``backbone`` features (of block ``layer``, None
+    for the last) is saved for ``task`` on ``dataset``: ``<root>/<model>/probes/<task>_<dataset>_<backbone>[-l<layer>]
+    [@<checkpoint>].pth``."""
     model, checkpoint = split_upsampler(upsampler)
     return os.path.join(
-        model_weights_dir(model, root), "probes", probe_name(task, dataset, backbone, checkpoint) + ".pth"
+        model_weights_dir(model, root), "probes", probe_name(task, dataset, backbone, checkpoint, layer) + ".pth"
     )
 
 
@@ -78,12 +82,13 @@ def save_probe(classifier, path, meta):
     return path
 
 
-def find_probe(task, dataset, backbone, upsampler, root=WEIGHTS_DIR):
+def find_probe(task, dataset, backbone, upsampler, root=WEIGHTS_DIR, layer=None):
     """Path of a saved probe; ``upsampler`` may leave out the ``@<checkpoint>`` suffix when a single one matches.
 
     ``backbone`` may be the full or the short name, and the checkpoint the file stem or its tag (``naf@release``).
+    ``layer`` selects the probe of an intermediate block's features (None: the last block's).
     """
-    path = probe_path(task, dataset, backbone, upsampler, root)
+    path = probe_path(task, dataset, backbone, upsampler, root, layer)
     if os.path.exists(path):
         return path
     directory, stem = os.path.dirname(path), Path(path).stem
@@ -118,7 +123,12 @@ def registry_path(cfg, task, model_ckpt):
     root = launch_path(cfg.eval.get("probe_dir"))
     kwargs = {"root": root} if root else {}
     return probe_path(
-        task, cfg.dataset.get("tag", "dataset"), cfg.backbone.name, upsampler_id(cfg.model, model_ckpt), **kwargs
+        task,
+        cfg.dataset.get("tag", "dataset"),
+        cfg.backbone.name,
+        upsampler_id(cfg.model, model_ckpt),
+        layer=cfg.backbone.get("layer"),
+        **kwargs,
     )
 
 
@@ -128,6 +138,7 @@ def probe_meta(cfg, task, model_ckpt, metrics, run_dir):
         "task": task,
         "dataset": cfg.dataset.get("tag", "dataset"),
         "backbone": cfg.backbone.name,
+        "backbone_layer": cfg.backbone.get("layer"),
         "upsampler": upsampler_id(cfg.model, model_ckpt),
         "model": OmegaConf.to_container(cfg.model, resolve=True),
         "model_ckpt": model_ckpt,

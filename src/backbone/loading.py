@@ -9,9 +9,15 @@ __all__ = ["load_backbone", "load_multiple_backbones"]
 
 
 def load_backbone(backbone_cfg, device):
-    """Load one frozen backbone in eval mode; ``name: rgb`` is instantiated from the config itself."""
+    """Load one frozen backbone in eval mode; ``name: rgb`` is instantiated from the config itself.
+
+    ``layer`` (optional) is the block whose features it returns, 1-based; unset or null for the last one.
+    """
     name = backbone_cfg["name"]
-    backbone = instantiate(backbone_cfg) if name == "rgb" else PretrainedViTWrapper(name=name)
+    if name == "rgb":
+        backbone = instantiate(backbone_cfg)
+    else:
+        backbone = PretrainedViTWrapper(name=name, layer=backbone_cfg.get("layer"))
     return backbone.to(device).eval().requires_grad_(False)
 
 

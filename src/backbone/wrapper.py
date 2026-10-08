@@ -37,12 +37,14 @@ class PretrainedViTWrapper(nn.Module):
 
     ``name`` may carry a fine-tune tag (``dvt_...``, ``fit3d_...``): the fine-tuned weights are then loaded from
     ``ckpt_dir``. Exposes ``patch_size``, ``embed_dim`` and ``config`` (``mean``, ``std``, ``input_size``, ``ps``).
+    ``layer`` is the block (1-based, timm backbones) whose output ``forward`` returns by default: None for the last one.
     """
 
     def __init__(
         self,
         name: str,
         norm: bool = True,
+        layer: int | None = None,
         dynamic_img_size: bool = True,
         dynamic_img_pad: bool = False,
         ckpt_dir: str = FINETUNED_CKPT_DIR,
@@ -51,6 +53,7 @@ class PretrainedViTWrapper(nn.Module):
         super().__init__()
         self.name = name
         self.norm = norm
+        self.layer = layer
 
         finetune_tag, model_name = split_finetune_tag(name)
         self.family = get_backbone_family(model_name)
@@ -69,7 +72,7 @@ class PretrainedViTWrapper(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        n: int | list[int] | tuple[int] = 1,
+        n: int | list[int] | tuple[int] | None = None,
         return_prefix_tokens: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Return the patch features of ``x`` as a ``(B, C, H / ps, W / ps)`` map.
@@ -77,8 +80,11 @@ class PretrainedViTWrapper(nn.Module):
         Args:
             x: Input image tensor.
             n: Block to take, as in ``forward_intermediates`` (timm backbones only); must select a single block.
+                None takes ``layer`` (the last block if unset).
             return_prefix_tokens: Also return the prefix (cls / register) tokens (timm backbones only, not SAM).
         """
+        if n is None:
+            n = 1 if self.layer is None else [self.layer - 1]
         return FAMILIES[self.family].features(
             self.model,
             x,
