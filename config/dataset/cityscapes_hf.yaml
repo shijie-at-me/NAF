@@ -1,0 +1,12 @@
+_target_: src.dataset.cityscapes.HFCityscapesDataset
+tag: "cityscapes"
+# Hub repo id or URL with id / image / mask (label ids) columns; private, so run `huggingface-cli login` first
+repo: shijli/cityscapes
+# semantic: fine annotations, 2975 train / 500 val
+name: semantic
+split: "train"
+include_labels: True
+# null uses $HF_HOME/datasets
+cache_dir: null
+num_proc: null
+num_classes: 19
